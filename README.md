@@ -183,7 +183,7 @@ dc snapshot --list         see your snapshots
 dc snapshot --rm clean     delete one
 ```
 
-If the container is running, `dc snapshot` stops it for a moment while it copies (so nothing is saved half-written) and starts it again after. That interrupts anything running in it, like a Claude session, so it asks first and says what's running; it's best to finish or exit what you're doing before taking a snapshot.
+If the container is running, `dc snapshot` stops it for a moment while it copies (so nothing is saved half-written) and starts it again after. If that would interrupt something, like a Claude session or a dev server, it tells you what and asks first; it's best to finish or exit what you're doing before taking a snapshot.
 
 You can keep as many as you like and hop between them: take `clean` before trying something, `try-1` after, and `dc restore clean` or `dc restore try-1` whenever you want.
 

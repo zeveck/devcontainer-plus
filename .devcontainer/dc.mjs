@@ -984,6 +984,38 @@ function refuseOverlap(root, cmd) {
   return true;
 }
 
+/**
+ * What's running in a container, in plain words, from `docker top -o comm,args`
+ * lines: friendly names where we know them, program names otherwise. The
+ * container's own startup loop doesn't count, so an idle container gives "".
+ */
+export function describeActivity(lines) {
+  const known = [];
+  const other = [];
+  for (const line of lines) {
+    const [comm, ...rest] = line.trim().split(/\s+/);
+    const args = rest.join(' ');
+    if (!comm || /while sleep|^sleep$/.test(args) || /^(sleep|docker-init|tini|ps)$/.test(comm)) continue;
+    if (comm === 'sh' && /while sleep/.test(args)) continue;
+    let name = null;
+    if (comm === 'claude' || /\bclaude(\s|$)/.test(args.split(' ')[0] || '')) name = 'a Claude session';
+    else if (/@openai\/codex|\bcodex(\s|$)/.test(args)) name = 'a Codex session';
+    else if (/@google\/gemini-cli|\bgemini(\s|$)/.test(args)) name = 'a Gemini session';
+    else if (/vscode-server/.test(args)) name = 'VS Code';
+    else if (/^(chrome|chromium|headless_shell)/.test(comm)) name = 'a browser';
+    else if (/^(bash|zsh|sh|fish)$/.test(comm)) name = 'a shell';
+    if (name) { if (!known.includes(name)) known.push(name); } else if (!other.includes(comm)) other.push(comm);
+  }
+  // Sessions first. A shell is how most other things start, so mention it only
+  // when nothing else is running.
+  const order = ['a Claude session', 'a Codex session', 'a Gemini session', 'VS Code', 'a browser'];
+  const all = [...order.filter((n) => known.includes(n)), ...other];
+  if (!all.length && known.includes('a shell')) all.push('a shell');
+  if (!all.length) return '';
+  const shown = all.length > 5 ? [...all.slice(0, 4), `${all.length - 4} more`] : all;
+  return shown.length === 1 ? shown[0] : `${shown.slice(0, -1).join(', ')} and ${shown.at(-1)}`;
+}
+
 async function cmdSnapshot(root, flags, rest) {
   if (flags.has('--list')) {
     const snaps = listSnapshots(root);
@@ -1019,25 +1051,20 @@ async function cmdSnapshot(root, flags, rest) {
   }
 
   const cs = findContainers(root);
-  // Snapshotting stops a running container for a moment, interrupting
-  // whatever runs in it, so say what that is and ask first.
+  // Snapshotting stops a running container for a moment. If that would
+  // interrupt something, say what and ask first; if it's idle, just go.
   const running = cs.filter((x) => x.state === 'running');
   if (running.length) {
-    const busy = new Set();
-    for (const c of running) {
-      const r = capture('docker', ['top', c.id, '-o', 'comm']);
-      for (const line of (r.status === 0 ? r.stdout : '').split('\n')) {
-        const cmd = line.trim().split('/').pop();
-        if (/^(claude|codex|gemini)$/.test(cmd)) busy.add(`a ${cmd[0].toUpperCase()}${cmd.slice(1)} session`);
-        else if (/^(bash|zsh|sh)$/.test(cmd) && !busy.has('a shell')) busy.add('a shell');
-      }
+    const what = describeActivity(running.flatMap((c) => {
+      const r = capture('docker', ['top', c.id, '-o', 'comm,args']);
+      return r.status === 0 ? r.stdout.split('\n').slice(1).filter(Boolean) : [];
+    }));
+    if (what) {
+      const q = `The container is running ${what}. Snapshotting stops it for a moment, which interrupts that. Go ahead?`;
+      if (!(await confirm(q, flags))) return 1;
+    } else {
+      console.log('Pausing the container while it copies...');
     }
-    // Agents first. The container's own startup shell always shows, so only
-    // mention a shell next to an agent.
-    const what = [...busy].filter((b) => b !== 'a shell').concat(busy.size > 1 && busy.has('a shell') ? ['a shell'] : []);
-    const q = `The container is running${what.length ? ` ${what.join(' and ')}` : ''}. `
-      + 'Snapshotting stops it for a moment, which interrupts anything running in it. Go ahead?';
-    if (!(await confirm(q, flags))) return 1;
   }
   const volumes = projectVolumes(root, cs);
   const image = helperImage(cs, null);

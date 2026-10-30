@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, realpathSync, readdirSync, statSync, chmodSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { SNAPSHOT_NAME, mountArg, devcontainerId, idLabelsFor } from '../.devcontainer/dc.mjs';
+import { SNAPSHOT_NAME, mountArg, devcontainerId, idLabelsFor, describeActivity } from '../.devcontainer/dc.mjs';
 
 const DC = resolve(fileURLToPath(import.meta.url), '../../.devcontainer/dc.mjs');
 const posixOnly = (t) => { if (process.platform === 'win32') { t.skip('POSIX shell stand-in'); return true; } return false; };
@@ -20,6 +20,15 @@ const posixOnly = (t) => { if (process.platform === 'win32') { t.skip('POSIX she
 test('snapshot names: simple words only', () => {
   for (const ok of ['clean', 'frog-try-1', 'b', 'v1.2_final']) assert.ok(SNAPSHOT_NAME.test(ok), ok);
   for (const bad of ['', '-x', '../up', 'a/b', 'has space', 'x'.repeat(41)]) assert.ok(!SNAPSHOT_NAME.test(bad), bad);
+});
+
+test('describeActivity: plain words for what would be interrupted', () => {
+  const idle = ['sh /bin/sh -c echo started; while sleep 1 & wait $!; do :; done', 'sleep sleep 1'];
+  assert.equal(describeActivity(idle), '');
+  assert.equal(describeActivity([...idle, 'bash bash -l']), 'a shell');
+  assert.equal(describeActivity([...idle, 'bash bash -l', 'python3 python3 -m http.server']), 'python3');
+  assert.equal(describeActivity([...idle, 'node node /home/u/.vscode-server/server.js', 'claude claude', 'node node vite']), 'a Claude session, VS Code and node');
+  assert.equal(describeActivity(['a a', 'b b', 'c c', 'd d', 'e e', 'f f']), 'a, b, c, d and 2 more');
 });
 
 test('mount arguments quote a source with a comma', () => {
@@ -59,7 +68,7 @@ if (args[0] === 'inspect') {
 if (a.startsWith('image inspect')) process.exit(0);
 if (a.startsWith('volume ls')) { process.stdout.write(Object.keys(st.volumes).join('\\n') + '\\n'); process.exit(0); }
 if (a.startsWith('volume create')) { st.volumes[args[2]] = true; mkdirSync(volDir(args[2]), { recursive: true }); save(); process.exit(0); }
-if (args[0] === 'top') { console.log('COMMAND'); for (const p of st.procs || ['sh', 'sleep']) console.log(p); process.exit(0); }
+if (args[0] === 'top') { console.log('COMMAND COMMAND'); for (const p of st.procs || ['sh /bin/sh -c while sleep 1 & wait $!; done', 'sleep sleep 1']) console.log(p); process.exit(0); }
 if (args[0] === 'stop') { if (st.failStop) { console.error('cannot stop'); process.exit(1); } st.state = 'exited'; save(); process.exit(0); }
 if (args[0] === 'start') { st.state = 'running'; save(); process.exit(0); }
 if (args[0] === 'rm') { st.container = false; save(); process.exit(0); }
@@ -329,7 +338,7 @@ test('dc snapshot: sweeps up folders left by interrupted snapshots', (t) => {
 test('dc snapshot: asks before stopping a running container, and says what it would interrupt', (t) => {
   if (posixOnly(t)) return;
   const s = setup(t);
-  const st = s.docker(); st.procs = ['sh', 'bash', '/usr/local/bin/claude', 'node']; writeFileSync(s.env.FAKE_STATE, JSON.stringify(st));
+  const st = s.docker(); st.procs = ['bash bash -l', 'claude claude']; writeFileSync(s.env.FAKE_STATE, JSON.stringify(st));
   const r = s.dc('snapshot', 'clean');
   assert.equal(r.status, 1);
   assert.match(r.stdout + r.stderr, /--yes/);
@@ -341,7 +350,7 @@ test('dc snapshot: asks before stopping a running container, and says what it wo
 test('dc snapshot: names the session in the question, and "no" changes nothing', (t) => {
   if (posixOnly(t)) return;
   const s = setup(t);
-  const st = s.docker(); st.procs = ['sh', 'bash', 'claude']; writeFileSync(s.env.FAKE_STATE, JSON.stringify(st));
+  const st = s.docker(); st.procs = ['bash bash -l', 'claude claude', 'python3 python3 -m http.server 8000']; writeFileSync(s.env.FAKE_STATE, JSON.stringify(st));
   // Answer "n" at a real (pseudo) terminal.
   const py = `
 import os, pty, select, sys, time
@@ -362,9 +371,18 @@ sys.stdout.write(out.decode(errors='replace'))
 `;
   const r = spawnSync('python3', ['-c', py, process.execPath, DC, 'snapshot', 'clean'], { cwd: s.proj, env: s.env, encoding: 'utf8' });
   if (r.error) return t.skip('no python3 here');
-  assert.match(r.stdout, /The container is running a Claude session and a shell\. Snapshotting stops it for a moment/);
+  assert.match(r.stdout, /The container is running a Claude session and python3\. Snapshotting stops it for a moment, which interrupts that\./);
   assert.equal(s.docker().state, 'running');
   assert.deepEqual(s.calls(), []);
+});
+
+test('dc snapshot: an idle running container needs no question', (t) => {
+  if (posixOnly(t)) return;
+  const s = setup(t);
+  const r = s.dc('snapshot', 'clean');
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /Pausing the container while it copies/);
+  assert.ok(s.calls().includes('stop c1') && s.calls().includes('start c1'));
 });
 
 test('dc snapshot: a stopped container needs no question', (t) => {
