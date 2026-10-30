@@ -46,7 +46,11 @@ test('dc snapshot and restore with real Docker', { skip: !enabled && 'set DC_DOC
   const readVol = (path) => docker('run', '--rm', '--mount', `type=volume,source=${vol},target=/data`, IMAGE,
     'sh', '-c', `cat ${path} 2>/dev/null; stat -c ' %u' ${path} 2>/dev/null; ls /data`).stdout;
 
-  const snap = dc('snapshot', 'clean');
+  // Running, so it asks first; refused without an answer, then done with --yes.
+  const refused = dc('snapshot', 'clean');
+  assert.equal(refused.status, 1);
+  assert.equal(docker('inspect', '-f', '{{.State.Running}}', cid).stdout.trim(), 'true', 'left running when refused');
+  const snap = dc('snapshot', 'clean', '--yes');
   assert.equal(snap.status, 0, snap.stderr + snap.stdout);
   assert.equal(docker('inspect', '-f', '{{.State.Running}}', cid).stdout.trim(), 'true', 'container restarted after the snapshot');
 
