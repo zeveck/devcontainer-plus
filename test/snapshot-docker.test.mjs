@@ -53,6 +53,14 @@ test('dc snapshot and restore with real Docker', { skip: !enabled && 'set DC_DOC
   assert.equal(snap.status, 0, snap.stderr + snap.stdout);
   assert.equal(docker('inspect', '-f', '{{.State.Running}}', cid).stdout.trim(), 'true', 'container restarted after the snapshot');
 
+  // Now something's running: it must name it and, with no one to ask, refuse.
+  assert.equal(docker('exec', '-d', cid, 'tail', '-f', '/dev/null').status, 0);
+  const busy = dc('snapshot', 'busy');
+  assert.equal(busy.status, 1, busy.stdout);
+  assert.match(busy.stdout + busy.stderr, /--yes/);
+  assert.equal(docker('inspect', '-f', '{{.State.Running}}', cid).stdout.trim(), 'true', 'left running');
+  assert.doesNotMatch(dc('snapshot', '--list').stdout, /^busy\s/m);
+
   const change = () => {
     writeFileSync(join(proj, 'notes.txt'), 'changed');
     writeFileSync(join(proj, 'new-game.txt'), 'new');

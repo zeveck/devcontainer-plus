@@ -984,9 +984,15 @@ function refuseOverlap(root, cmd) {
   return true;
 }
 
+// Lists a container's processes as "comm args" lines, read from /proc so it
+// works in any Linux container (no ps needed). Skips itself.
+const PROCESS_LIST = 'for d in /proc/[0-9]*; do [ "${d#/proc/}" = "$$" ] && continue; '
+  + 'c=$(cat "$d/comm" 2>/dev/null) || continue; a=$(tr "\\000\\n" "  " < "$d/cmdline" 2>/dev/null); '
+  + 'case "$a" in *"/proc/[0-9]"*) continue ;; esac; printf "%s %s\\n" "$c" "$a"; done';
+
 /**
- * What's running in a container, in plain words, from `docker top -o comm,args`
- * lines: friendly names where we know them, program names otherwise. The
+ * What's running in a container, in plain words, from "comm args" lines
+ * (PROCESS_LIST): friendly names where we know them, program names otherwise. The
  * container's own startup loop doesn't count, so an idle container gives "".
  */
 export function describeActivity(lines) {
@@ -995,10 +1001,12 @@ export function describeActivity(lines) {
   for (const line of lines) {
     const [comm, ...rest] = line.trim().split(/\s+/);
     const args = rest.join(' ');
-    if (!comm || /while sleep|^sleep$/.test(args) || /^(sleep|docker-init|tini|ps)$/.test(comm)) continue;
+    if (!comm || /while sleep|^sleep$/.test(args) || /^(sleep|docker-init|tini|ps|cat|tr)$/.test(comm)) continue;
     if (comm === 'sh' && /while sleep/.test(args)) continue;
     let name = null;
-    if (comm === 'claude' || /\bclaude(\s|$)/.test(args.split(' ')[0] || '')) name = 'a Claude session';
+    // Claude Code's native binary is named for its version (2.1.304), so its
+    // helper processes show that instead of "claude".
+    if (comm === 'claude' || /^\d+\.\d+\.\d+$/.test(comm) || /(^|\/)claude$/.test(args.split(' ')[0] || '')) name = 'a Claude session';
     else if (/@openai\/codex|\bcodex(\s|$)/.test(args)) name = 'a Codex session';
     else if (/@google\/gemini-cli|\bgemini(\s|$)/.test(args)) name = 'a Gemini session';
     else if (/vscode-server/.test(args)) name = 'VS Code';
@@ -1055,12 +1063,19 @@ async function cmdSnapshot(root, flags, rest) {
   // interrupt something, say what and ask first; if it's idle, just go.
   const running = cs.filter((x) => x.state === 'running');
   if (running.length) {
-    const what = describeActivity(running.flatMap((c) => {
-      const r = capture('docker', ['top', c.id, '-o', 'comm,args']);
-      return r.status === 0 ? r.stdout.split('\n').slice(1).filter(Boolean) : [];
-    }));
-    if (what) {
-      const q = `The container is running ${what}. Snapshotting stops it for a moment, which interrupts that. Go ahead?`;
+    let lines = [];
+    let looked = true;
+    for (const c of running) {
+      const r = capture('docker', ['exec', c.id, 'sh', '-c', PROCESS_LIST]);
+      if (r.status !== 0) { looked = false; break; }
+      lines = lines.concat(r.stdout.split('\n').filter(Boolean));
+    }
+    const what = looked ? describeActivity(lines) : '';
+    if (!looked || what) {
+      // Couldn't look inside? Ask anyway rather than assume it's idle.
+      const q = looked
+        ? `The container is running ${what}. Snapshotting stops it for a moment, which interrupts that. Go ahead?`
+        : 'Snapshotting stops the container for a moment, which interrupts anything running in it. Go ahead?';
       if (!(await confirm(q, flags))) return 1;
     } else {
       console.log('Pausing the container while it copies...');

@@ -28,6 +28,7 @@ test('describeActivity: plain words for what would be interrupted', () => {
   assert.equal(describeActivity([...idle, 'bash bash -l']), 'a shell');
   assert.equal(describeActivity([...idle, 'bash bash -l', 'python3 python3 -m http.server']), 'python3');
   assert.equal(describeActivity([...idle, 'node node /home/u/.vscode-server/server.js', 'claude claude', 'node node vite']), 'a Claude session, VS Code and node');
+  assert.equal(describeActivity([...idle, '2.1.304 ugrep -G --hidden']), 'a Claude session', "Claude's versioned binary");
   assert.equal(describeActivity(['a a', 'b b', 'c c', 'd d', 'e e', 'f f']), 'a, b, c, d and 2 more');
 });
 
@@ -46,7 +47,7 @@ const st = JSON.parse(readFileSync(statePath, 'utf8'));
 const save = () => writeFileSync(statePath, JSON.stringify(st));
 const args = process.argv.slice(2);
 const a = args.join(' ');
-if (args[0] !== 'ps' && args[0] !== 'top' && args[0] !== 'inspect' && !a.startsWith('volume ls') && args[0] !== 'info' && !a.startsWith('image inspect')) {
+if (args[0] !== 'ps' && args[0] !== 'exec' && args[0] !== 'inspect' && !a.startsWith('volume ls') && args[0] !== 'info' && !a.startsWith('image inspect')) {
   appendFileSync(process.env.FAKE_LOG, (args[0] === 'run' ? 'run ' + args.filter((x) => x.startsWith('type=')).join(' ') : a) + '\\n');
 }
 const volDir = (name) => join(st.volumesDir, name);
@@ -68,7 +69,12 @@ if (args[0] === 'inspect') {
 if (a.startsWith('image inspect')) process.exit(0);
 if (a.startsWith('volume ls')) { process.stdout.write(Object.keys(st.volumes).join('\\n') + '\\n'); process.exit(0); }
 if (a.startsWith('volume create')) { st.volumes[args[2]] = true; mkdirSync(volDir(args[2]), { recursive: true }); save(); process.exit(0); }
-if (args[0] === 'top') { console.log('COMMAND COMMAND'); for (const p of st.procs || ['sh /bin/sh -c while sleep 1 & wait $!; done', 'sleep sleep 1']) console.log(p); process.exit(0); }
+if (args[0] === 'exec' && args.at(-1).includes('/proc/[0-9]')) {
+  // The process listing dc runs inside the container.
+  if (st.noListing) process.exit(126);
+  for (const p of st.procs || ['sh /bin/sh -c while sleep 1 & wait $!; done', 'sleep sleep 1']) console.log(p);
+  process.exit(0);
+}
 if (args[0] === 'stop') { if (st.failStop) { console.error('cannot stop'); process.exit(1); } st.state = 'exited'; save(); process.exit(0); }
 if (args[0] === 'start') { st.state = 'running'; save(); process.exit(0); }
 if (args[0] === 'rm') { st.container = false; save(); process.exit(0); }
@@ -383,6 +389,17 @@ test('dc snapshot: an idle running container needs no question', (t) => {
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /Pausing the container while it copies/);
   assert.ok(s.calls().includes('stop c1') && s.calls().includes('start c1'));
+});
+
+test('dc snapshot: asks anyway when it can\'t see what\'s running', (t) => {
+  if (posixOnly(t)) return;
+  const s = setup(t);
+  const st = s.docker(); st.noListing = true; writeFileSync(s.env.FAKE_STATE, JSON.stringify(st));
+  const r = s.dc('snapshot', 'clean');
+  assert.equal(r.status, 1);
+  assert.match(r.stdout + r.stderr, /--yes/);
+  assert.equal(s.docker().state, 'running');
+  assert.deepEqual(s.calls(), []);
 });
 
 test('dc snapshot: a stopped container needs no question', (t) => {
