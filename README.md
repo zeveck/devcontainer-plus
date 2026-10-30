@@ -12,6 +12,7 @@ It all runs locally, on your own hardware. The difference is that the agents and
 - [The `dc` command](#the-dc-command)
 - [Signing in to GitHub and GitLab](#signing-in-to-github-and-gitlab)
 - [Keeping agent history across rebuilds](#keeping-agent-history-across-rebuilds)
+- [Snapshots: saving a moment and going back](#snapshots-saving-a-moment-and-going-back)
 - [Reaching a server in the container](#reaching-a-server-in-the-container)
 - [Letting an agent use a browser](#letting-an-agent-use-a-browser)
 - [Changing how it's set up](#changing-how-its-set-up)
@@ -103,6 +104,7 @@ dc exec ...    run any command inside it
 dc down        stop it                          (dc rm deletes it too, dc rm --volumes also its agent data)
 dc volumes     saved agent history              (see below)
 dc forward     reach a port in the container    (see below)
+dc snapshot    save this moment to come back to (see below; dc restore goes back)
 dc status      show this project's container
 dc logs        show its output                  (--follow to keep watching)
 dc doctor      check your setup
@@ -169,6 +171,30 @@ A few things to know:
 - **Sessions are kept as written.** Anything pasted into a session, or printed during one, stays in its history. Logins are deleted, but a key you typed into a settings file yourself (such as the `env` block of Claude's `settings.json`, or `~/.gemini/.env`) is kept like any other setting.
 
 Without `dc`, the volumes are named `agent-claude-<id>`, `agent-codex-<id>`, and `agent-gemini-<id>`; `docker volume ls` lists them and `docker volume rm` deletes them once their container is removed.
+
+## Snapshots: saving a moment and going back
+
+A snapshot saves your project folder and the agents' data (their history, settings, plugins and sign-ins) so you can come back to exactly that moment later. It's handy for trying things: set things up the way you like, take a snapshot, try something, and go back as often as you want.
+
+```
+dc snapshot clean          save this moment as "clean"
+dc restore clean           go back to it
+dc snapshot --list         see your snapshots
+dc snapshot --rm clean     delete one
+```
+
+You can keep as many as you like and hop between them: take `clean` before trying something, `try-1` after, and `dc restore clean` or `dc restore try-1` whenever you want.
+
+`dc restore` puts the project folder back exactly as it was (files made since are removed, changed files go back) and starts a brand-new container, so anything the work left inside the old container is gone too. That takes a few minutes while the agents install, and, as with any rebuild, you'll sign in to Claude again. Add `--quick` to keep the container instead: it's back in seconds, sign-in and all, but anything installed inside the container since stays.
+
+Restoring replaces what's in your project folder, so `dc restore` asks first (add `--yes` to skip the question). It checks the snapshot is whole and belongs to this project before it changes anything. A few things to know:
+
+- **It's the whole folder, git included.** Commits and branches made since the snapshot go too, so push or copy anything you want to keep first.
+- **Close VS Code's window on this container first,** if you have one open; restoring removes the container out from under it.
+- **A `--quick` sign-in can be stale.** It's the one from when you took the snapshot; if Claude has refreshed it since, you may need to sign in again anyway.
+- **If a file can't be removed** (another program has it open), everything from the snapshot still comes back, and `dc restore` tells you which leftovers to delete.
+
+Snapshots are kept on your computer in `dc`'s own folder, never in the project, because they hold your sign-ins and `.env` keys. The image isn't part of a snapshot: nothing you do changes it, and `dc restore` reuses it (unless the snapshot's dev container setup differs from what's cached, in which case it's rebuilt). In the rare case there's no image to do the copying with, `dc` fetches a small one, which needs an internet connection the first time.
 
 ## Reaching a server in the container
 
