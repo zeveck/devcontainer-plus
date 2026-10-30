@@ -183,6 +183,8 @@ dc snapshot --list         see your snapshots
 dc snapshot --rm clean     delete one
 ```
 
+If the container is running, `dc snapshot` stops it for a moment while it copies (so nothing is saved half-written) and starts it again after. That interrupts anything running in it, like a Claude session, so it asks first and says what's running; it's best to finish or exit what you're doing before taking a snapshot.
+
 You can keep as many as you like and hop between them: take `clean` before trying something, `try-1` after, and `dc restore clean` or `dc restore try-1` whenever you want.
 
 `dc restore` puts the project folder back exactly as it was (files made since are removed, changed files go back) and starts a brand-new container, so anything the work left inside the old container is gone too. That takes a few minutes while the agents install, and, as with any rebuild, you'll sign in to Claude again. Add `--quick` to keep the container instead: it's back in seconds, sign-in and all, but anything installed inside the container since stays.

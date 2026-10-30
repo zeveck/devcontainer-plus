@@ -37,7 +37,7 @@ const st = JSON.parse(readFileSync(statePath, 'utf8'));
 const save = () => writeFileSync(statePath, JSON.stringify(st));
 const args = process.argv.slice(2);
 const a = args.join(' ');
-if (args[0] !== 'ps' && args[0] !== 'inspect' && !a.startsWith('volume ls') && args[0] !== 'info' && !a.startsWith('image inspect')) {
+if (args[0] !== 'ps' && args[0] !== 'top' && args[0] !== 'inspect' && !a.startsWith('volume ls') && args[0] !== 'info' && !a.startsWith('image inspect')) {
   appendFileSync(process.env.FAKE_LOG, (args[0] === 'run' ? 'run ' + args.filter((x) => x.startsWith('type=')).join(' ') : a) + '\\n');
 }
 const volDir = (name) => join(st.volumesDir, name);
@@ -59,6 +59,7 @@ if (args[0] === 'inspect') {
 if (a.startsWith('image inspect')) process.exit(0);
 if (a.startsWith('volume ls')) { process.stdout.write(Object.keys(st.volumes).join('\\n') + '\\n'); process.exit(0); }
 if (a.startsWith('volume create')) { st.volumes[args[2]] = true; mkdirSync(volDir(args[2]), { recursive: true }); save(); process.exit(0); }
+if (args[0] === 'top') { console.log('COMMAND'); for (const p of st.procs || ['sh', 'sleep']) console.log(p); process.exit(0); }
 if (args[0] === 'stop') { if (st.failStop) { console.error('cannot stop'); process.exit(1); } st.state = 'exited'; save(); process.exit(0); }
 if (args[0] === 'start') { st.state = 'running'; save(); process.exit(0); }
 if (args[0] === 'rm') { st.container = false; save(); process.exit(0); }
@@ -122,7 +123,7 @@ function setup(t, { running = true } = {}) {
 test('dc snapshot: saves the folder and the agent data, pausing the container', (t) => {
   if (posixOnly(t)) return;
   const { dc, calls, docker, env } = setup(t);
-  const r = dc('snapshot', 'clean');
+  const r = dc('snapshot', 'clean', '--yes');
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /Saved snapshot clean: the project folder and claude data/);
   const snaps = join(env.DC_STATE_DIR, 'snapshots');
@@ -175,7 +176,7 @@ function assertAsSnapshotted({ proj, vol }) {
 test('dc restore --quick: puts the folder and agent data back exactly, keeping the container', (t) => {
   if (posixOnly(t)) return;
   const s = setup(t);
-  assert.equal(s.dc('snapshot', 'clean').status, 0);
+  assert.equal(s.dc('snapshot', 'clean', '--yes').status, 0);
   changeEverything(s);
   s.clearCalls();
   const r = s.dc('restore', 'clean', '--quick', '--yes');
@@ -189,7 +190,7 @@ test('dc restore --quick: puts the folder and agent data back exactly, keeping t
 test('dc restore: a fresh container, even after the data was deleted', (t) => {
   if (posixOnly(t)) return;
   const s = setup(t);
-  assert.equal(s.dc('snapshot', 'clean').status, 0);
+  assert.equal(s.dc('snapshot', 'clean', '--yes').status, 0);
   changeEverything(s);
   rmSync(s.vol, { recursive: true, force: true }); // as after `dc rm --volumes`
   s.clearCalls();
@@ -208,7 +209,7 @@ test('dc restore: a fresh container, even after the data was deleted', (t) => {
 test('dc restore: asks first, and changes nothing when it can\'t ask', (t) => {
   if (posixOnly(t)) return;
   const s = setup(t);
-  assert.equal(s.dc('snapshot', 'clean').status, 0);
+  assert.equal(s.dc('snapshot', 'clean', '--yes').status, 0);
   changeEverything(s);
   s.clearCalls();
   const r = s.dc('restore', 'clean');
@@ -221,7 +222,7 @@ test('dc restore: asks first, and changes nothing when it can\'t ask', (t) => {
 test('dc restore: a damaged snapshot is refused before anything is deleted', (t) => {
   if (posixOnly(t)) return;
   const s = setup(t);
-  assert.equal(s.dc('snapshot', 'clean').status, 0);
+  assert.equal(s.dc('snapshot', 'clean', '--yes').status, 0);
   const [key] = readdirSync(join(s.env.DC_STATE_DIR, 'snapshots'));
   writeFileSync(join(s.env.DC_STATE_DIR, 'snapshots', key, 'clean', 'project.tgz'), 'not a tarball');
   changeEverything(s);
@@ -237,7 +238,7 @@ test('dc restore: a damaged snapshot is refused before anything is deleted', (t)
 test('dc restore: a snapshot without this project\'s dev container setup is refused', (t) => {
   if (posixOnly(t)) return;
   const s = setup(t);
-  assert.equal(s.dc('snapshot', 'clean').status, 0);
+  assert.equal(s.dc('snapshot', 'clean', '--yes').status, 0);
   // Replace the project archive with one of an unrelated folder.
   const [key] = readdirSync(join(s.env.DC_STATE_DIR, 'snapshots'));
   const other = join(s.dir, 'other'); mkdirSync(other); writeFileSync(join(other, 'x.txt'), 'x');
@@ -260,7 +261,7 @@ test('dc restore: unknown names and options', (t) => {
 test('dc restore: a file that can\'t be removed doesn\'t stop the rest coming back', (t) => {
   if (posixOnly(t)) return;
   const s = setup(t);
-  assert.equal(s.dc('snapshot', 'clean').status, 0);
+  assert.equal(s.dc('snapshot', 'clean', '--yes').status, 0);
   changeEverything(s);
   // A folder whose contents can't be deleted, like a file another program holds open.
   const locked = join(s.proj, 'zlocked');
@@ -279,7 +280,7 @@ test('dc snapshot: refuses to keep snapshots inside the project', (t) => {
   if (posixOnly(t)) return;
   const s = setup(t);
   s.env.DC_STATE_DIR = join(s.proj, '.dcstate');
-  const r = s.dc('snapshot', 'clean');
+  const r = s.dc('snapshot', 'clean', '--yes');
   assert.equal(r.status, 1);
   assert.match(r.stderr, /snapshots would be kept inside the project/);
   assert.ok(!existsSync(join(s.proj, '.dcstate', 'snapshots')));
@@ -288,7 +289,7 @@ test('dc snapshot: refuses to keep snapshots inside the project', (t) => {
 test('dc restore: fills the volume the container actually uses', (t) => {
   if (posixOnly(t)) return;
   const s = setup(t);
-  assert.equal(s.dc('snapshot', 'clean').status, 0);
+  assert.equal(s.dc('snapshot', 'clean', '--yes').status, 0);
   // The container now mounts a differently named claude volume (as when the
   // dev container tool saw the folder's path in another letter case).
   const other = `agent-claude-${'v'.repeat(52)}`;
@@ -305,7 +306,7 @@ test('dc snapshot: a container that won\'t stop means nothing is saved, and it\'
   if (posixOnly(t)) return;
   const s = setup(t);
   const st = s.docker(); st.failStop = true; writeFileSync(s.env.FAKE_STATE, JSON.stringify(st));
-  const r = s.dc('snapshot', 'clean');
+  const r = s.dc('snapshot', 'clean', '--yes');
   assert.equal(r.status, 1);
   assert.match(r.stderr, /couldn't stop container c1, so nothing was saved/);
   assert.match(s.dc('snapshot', '--list').stdout, /No snapshots yet/);
@@ -323,4 +324,53 @@ test('dc snapshot: sweeps up folders left by interrupted snapshots', (t) => {
   assert.ok(!existsSync(stale));
   assert.match(s.dc('snapshot', '--list').stdout, /^first\s/m);
   assert.doesNotMatch(s.dc('snapshot', '--list').stdout, /partial/);
+});
+
+test('dc snapshot: asks before stopping a running container, and says what it would interrupt', (t) => {
+  if (posixOnly(t)) return;
+  const s = setup(t);
+  const st = s.docker(); st.procs = ['sh', 'bash', '/usr/local/bin/claude', 'node']; writeFileSync(s.env.FAKE_STATE, JSON.stringify(st));
+  const r = s.dc('snapshot', 'clean');
+  assert.equal(r.status, 1);
+  assert.match(r.stdout + r.stderr, /--yes/);
+  assert.deepEqual(s.calls(), [], 'container untouched');
+  assert.equal(s.docker().state, 'running');
+  assert.match(s.dc('snapshot', '--list').stdout, /No snapshots yet/);
+});
+
+test('dc snapshot: names the session in the question, and "no" changes nothing', (t) => {
+  if (posixOnly(t)) return;
+  const s = setup(t);
+  const st = s.docker(); st.procs = ['sh', 'bash', 'claude']; writeFileSync(s.env.FAKE_STATE, JSON.stringify(st));
+  // Answer "n" at a real (pseudo) terminal.
+  const py = `
+import os, pty, select, sys, time
+pid, fd = pty.fork()
+if pid == 0:
+    os.execv(sys.argv[1], sys.argv[1:])
+out = b''; sent = False; end = time.time() + 30
+while time.time() < end:
+    r, _, _ = select.select([fd], [], [], 0.5)
+    if not r: continue
+    try: d = os.read(fd, 4096)
+    except OSError: break
+    if not d: break
+    out += d
+    if b'Go ahead?' in out and not sent: os.write(fd, b'n\\n'); sent = True
+os.waitpid(pid, 0)
+sys.stdout.write(out.decode(errors='replace'))
+`;
+  const r = spawnSync('python3', ['-c', py, process.execPath, DC, 'snapshot', 'clean'], { cwd: s.proj, env: s.env, encoding: 'utf8' });
+  if (r.error) return t.skip('no python3 here');
+  assert.match(r.stdout, /The container is running a Claude session and a shell\. Snapshotting stops it for a moment/);
+  assert.equal(s.docker().state, 'running');
+  assert.deepEqual(s.calls(), []);
+});
+
+test('dc snapshot: a stopped container needs no question', (t) => {
+  if (posixOnly(t)) return;
+  const s = setup(t, { running: false });
+  const r = s.dc('snapshot', 'clean');
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(!s.calls().includes('stop c1'));
 });

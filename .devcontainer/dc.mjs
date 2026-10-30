@@ -282,7 +282,7 @@ function projectVolumes(root, containers) {
 async function confirm(question, flags) {
   if (flags.has('--yes')) return true;
   if (!process.stdin.isTTY) {
-    console.error('dc: not deleting without confirmation; rerun with --yes.');
+    console.error('dc: not going ahead without confirmation; rerun with --yes.');
     return false;
   }
   // Imported here so an old Node still reaches the friendly version check.
@@ -1019,6 +1019,26 @@ async function cmdSnapshot(root, flags, rest) {
   }
 
   const cs = findContainers(root);
+  // Snapshotting stops a running container for a moment, interrupting
+  // whatever runs in it, so say what that is and ask first.
+  const running = cs.filter((x) => x.state === 'running');
+  if (running.length) {
+    const busy = new Set();
+    for (const c of running) {
+      const r = capture('docker', ['top', c.id, '-o', 'comm']);
+      for (const line of (r.status === 0 ? r.stdout : '').split('\n')) {
+        const cmd = line.trim().split('/').pop();
+        if (/^(claude|codex|gemini)$/.test(cmd)) busy.add(`a ${cmd[0].toUpperCase()}${cmd.slice(1)} session`);
+        else if (/^(bash|zsh|sh)$/.test(cmd) && !busy.has('a shell')) busy.add('a shell');
+      }
+    }
+    // Agents first. The container's own startup shell always shows, so only
+    // mention a shell next to an agent.
+    const what = [...busy].filter((b) => b !== 'a shell').concat(busy.size > 1 && busy.has('a shell') ? ['a shell'] : []);
+    const q = `The container is running${what.length ? ` ${what.join(' and ')}` : ''}. `
+      + 'Snapshotting stops it for a moment, which interrupts anything running in it. Go ahead?';
+    if (!(await confirm(q, flags))) return 1;
+  }
   const volumes = projectVolumes(root, cs);
   const image = helperImage(cs, null);
   if (!image) return 1;
@@ -1033,7 +1053,7 @@ async function cmdSnapshot(root, flags, rest) {
   let ok = true;
   try {
     // Stop the container so nothing is half-written while it's copied.
-    for (const c of cs.filter((x) => x.state === 'running')) {
+    for (const c of running) {
       if ((runQuiet('docker', ['stop', c.id]).status ?? 1) !== 0) {
         console.error(`dc snapshot: couldn't stop container ${c.id}, so nothing was saved.`);
         ok = false;
@@ -1341,7 +1361,7 @@ const HELP = `dc — dev containers without VS Code
   dc forward [<port>...]           forward ports to localhost, or list them
   dc forward <port>... --network   ...and to other devices on your network
   dc forward --rm <port>...        stop forwarding them
-  dc snapshot <name>               save the project folder and agent data
+  dc snapshot <name> [--yes]       save the project folder and agent data
   dc snapshot --list | --rm <name> list snapshots, or delete one
   dc restore <name> [--quick]      put a snapshot back (--yes: don't ask)
   dc status                        show this project's containers
@@ -1384,7 +1404,7 @@ async function main(argv) {
     }
   }
   if (cmd === 'snapshot' || cmd === 'restore') {
-    const allowed = cmd === 'snapshot' ? ['--list', '--rm'] : ['--quick', '--yes'];
+    const allowed = cmd === 'snapshot' ? ['--list', '--rm', '--yes'] : ['--quick', '--yes'];
     const unknown = [...flags].filter((f) => !allowed.includes(f));
     if (unknown.length) { console.error(`dc ${cmd}: unknown option ${unknown.join(' ')}`); return 1; }
   }
