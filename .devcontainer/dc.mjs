@@ -953,12 +953,12 @@ const save = (from, file) => `${TAR_N} umask 077 && tar $N --exclude=./${STAGING
  */
 const refill = (target, archive, exact) => {
   const own = exact ? '$N -p' : '--no-same-owner --no-same-permissions';
-  const cp = exact ? 'cp -a' : 'cp -R --preserve=timestamps';
   const S = `${target}/${STAGING}`;
   return `${TAR_N} rm -rf ${S} && mkdir ${S} && tar ${own} -C ${S} -xzf /snap/${archive} `
     + `|| { rm -rf ${S}; echo "couldn't unpack ${archive}" >&2; exit 3; }; `
     + `find ${target} -mindepth 1 -maxdepth 1 ! -name ${STAGING} -exec rm -rf {} + 2>/dev/null; `
-    + `ls -A ${S} > /tmp/want; ${cp} ${S}/. ${target}/ || { echo "couldn't copy the snapshot in" >&2; rm -rf ${S}; exit 5; }; `
+    + `ls -A ${S} > /tmp/want; (cd ${S} && tar cf - .) | (cd ${target} && tar ${own} -xf -) `
+    + `|| { echo "couldn't copy the snapshot in" >&2; rm -rf ${S}; exit 5; }; `
     + `rm -rf ${S}; extra=$(ls -A ${target} | grep -v -x -F -f /tmp/want); `
     + `[ -z "$extra" ] || { printf '%s\\n' "$extra" | sed 's/^/left: /' >&2; exit 4; }`;
 };
