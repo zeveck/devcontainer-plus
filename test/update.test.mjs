@@ -23,14 +23,10 @@ function setup(t) {
       else writeFileSync(join(root, '.devcontainer', name), text);
     }
   };
-  const release = (files, news) => {
-    write(tpl, files);
-    if (news) writeFileSync(join(tpl, 'CHANGELOG.md'), `# What's new\n\n## 2026-11-01\n\n${news.map((n) => `- ${n}\n`).join('')}`);
-    git('add', '-A'); git('commit', '-qm', 'release');
-  };
+  const release = (files) => { write(tpl, files); git('add', '-A'); git('commit', '-qm', 'release'); };
   mkdirSync(join(tpl, '.devcontainer'), { recursive: true });
   spawnSync('git', ['init', '-q', '-b', 'main', tpl]);
-  release({ 'devcontainer.json': '{}\n', 'setup.sh': SETUP, 'old.sh': 'echo old\n' }, ['`dc snapshot` saves a moment.']);
+  release({ 'devcontainer.json': '{}\n', 'setup.sh': SETUP, 'old.sh': 'echo old\n' });
   const proj = join(dir, 'proj');
   mkdirSync(join(proj, '.devcontainer'), { recursive: true });
   writeFileSync(join(proj, '.devcontainer', 'devcontainer.json'), '{}\n');
@@ -51,11 +47,10 @@ test('dc update: first run adds the template, then a later one updates, merges a
 
   // You change one line; the template changes another, and drops old.sh.
   s.write({ 'setup.sh': SETUP.replace('echo one', 'echo mine') });
-  s.release({ 'setup.sh': SETUP.replace('echo five', 'echo five, improved'), 'devcontainer.json': '{"v": 2}\n', 'old.sh': null },
-    ['`dc update` brings it up to date.', '`dc snapshot` saves a moment.']);
+  s.release({ 'setup.sh': SETUP.replace('echo five', 'echo five, improved'), 'devcontainer.json': '{"v": 2}\n', 'old.sh': null });
   r = s.update();
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /What's new:\n  - `dc update` brings it up to date\.\n(?!  - `dc snapshot`)/, 'only the new line');
+  assert.match(r.stdout, /What's new: https:\/\/dcp\.synapticnoise\.com\/whats-new\//);
   assert.equal(s.read('setup.sh'), SETUP.replace('echo one', 'echo mine').replace('echo five', 'echo five, improved'));
   assert.equal(s.read('devcontainer.json'), '{"v": 2}\n');
   assert.ok(!existsSync(join(s.proj, '.devcontainer', 'old.sh')));

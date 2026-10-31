@@ -4,6 +4,8 @@ A development container that's ready to work in, with Claude Code, Codex CLI, an
 
 It all runs locally, on your own hardware. The difference is that the agents and their tools live inside the container rather than on your system, and they only see the project you opened.
 
+**[What's new](https://dcp.synapticnoise.com/whats-new/)**: the latest changes, in plain words.
+
 ## Contents
 
 - [What's inside](#whats-inside)
@@ -108,11 +110,11 @@ dc forward     reach a port in the container    (see below)
 dc snapshot    save this moment to come back to (see below; dc restore goes back)
 dc status      show this project's container
 dc logs        show its output                  (--follow to keep watching)
-dc update      get the latest devcontainer-plus     (see below)
+dc update      get the latest devcontainer-plus (see below)
 dc doctor      check your setup
 ```
 
-Before stopping or replacing a running container (`dc up --rebuild`, `dc up --fresh`, `dc down`, `dc rm`, `dc snapshot`), `dc` looks at what's running in it. If Claude, Codex, Gemini or anything else is busy, it says what and asks first; an idle container just goes. Add `--yes` to skip the question.
+Before stopping or replacing a running container (`dc up --rebuild`, `dc up --fresh`, `dc down`, `dc rm`, `dc snapshot`, `dc restore`), `dc` looks at what's running in it. If Claude, Codex, Gemini or anything else is busy, it says what and asks first; an idle container just goes. Add `--yes` to skip the question.
 
 When something won't start, run `dc doctor` first. It checks Docker, Node, and your project, and tells you which one is the problem.
 
@@ -278,9 +280,11 @@ To bring a project's `.devcontainer` up to the latest devcontainer-plus, run thi
 dc update
 ```
 
-It fetches the latest version from GitHub (or give it a local copy of this repo: `dc update C:\LocalDev\devcontainer-plus`), shows what it would change, and asks first. Files you haven't touched are updated; files you've changed keep your changes, with the new version's changes merged in. If you both changed the same lines, yours stays as it is and the new version is saved beside it as `<file>.new` to compare. Files that aren't part of devcontainer-plus are left alone. Then rebuild with `dc up --rebuild`.
+It checks GitHub for a newer version (or give it a local copy of this repo: `dc update C:\LocalDev\devcontainer-plus`), links to [what's new](https://dcp.synapticnoise.com/whats-new/), and asks before changing anything. Then rebuild with `dc up --rebuild`.
 
-It keeps a small record of what it installed in `.devcontainer/.dcp.json`; commit it with the rest. The first time, before there's a record, it can't tell your changes from an older copy, so it replaces files that differ and says so: if the project is in git, `git diff .devcontainer` shows what changed, so you can put back anything of yours.
+Files you haven't touched are simply updated. Files you've changed keep your changes, with the new version merged in. If you both changed the same lines, yours stays as it is and the new version is saved beside it as `<file>.new` to compare; `dc update` tells you when that happens. Files that aren't part of devcontainer-plus are left alone.
+
+It keeps a small record of what it installed in `.devcontainer/.dcp.json`; commit it with the rest. The first time, before there's a record, it can't tell your changes from an older copy, so it replaces files that differ and says so. If the project is in git, `git diff .devcontainer` shows what changed, so you can put back anything of yours; if not, the old copies are kept as `.orig` files.
 
 ## Disclaimer
 

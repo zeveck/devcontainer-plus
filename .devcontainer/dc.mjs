@@ -1312,6 +1312,7 @@ function reportNoMatch(root) {
 
 const TEMPLATE_REPO = 'zeveck/devcontainer-plus';
 const RECORD = '.dcp.json';
+const WHATS_NEW = 'https://dcp.synapticnoise.com/whats-new/';
 // Line endings don't count as a change: a Windows checkout has CRLF.
 const lf = (text) => text.replace(/\r\n/g, '\n');
 const fingerprint = (text) => createHash('sha256').update(lf(text)).digest('hex');
@@ -1347,11 +1348,7 @@ async function loadTemplate(from) {
         const r = git('show', `${v}:.devcontainer/${name}`);
         return r.status === 0 ? r.stdout : null;
       };
-      const changelog = (v) => {
-        const r = git('show', `${v}:CHANGELOG.md`);
-        return r.status === 0 ? r.stdout : null;
-      };
-      return { version, files, base, changelog };
+      return { version, files, base };
     }
     // A plain folder: no versions, so changes here can't be merged later.
     const files = readdirSync(join(dir, '.devcontainer'), { withFileTypes: true })
@@ -1360,8 +1357,7 @@ async function loadTemplate(from) {
         const path = join(dir, '.devcontainer', e.name);
         return { name: e.name, text: readFileSync(path, 'utf8'), executable: (statSync(path).mode & 0o111) !== 0 };
       });
-    const log = join(dir, 'CHANGELOG.md');
-    return { version: null, files, base: () => null, changelog: (v) => (v === null && existsSync(log) ? readFileSync(log, 'utf8') : null) };
+    return { version: null, files, base: () => null };
   }
   const offline = 'You can also use a local copy of devcontainer-plus: dc update <folder>';
   const get = async (url) => {
@@ -1384,33 +1380,7 @@ async function loadTemplate(from) {
   const base = async (name, v) => {
     try { return await (await get(raw(v, name))).text(); } catch { return null; }
   };
-  const changelog = async (v) => {
-    try { return await (await get(`https://raw.githubusercontent.com/${TEMPLATE_REPO}/${v}/CHANGELOG.md`)).text(); } catch { return null; }
-  };
-  return { version, files, base, changelog };
-}
-
-/** A changelog's entries, newest section first: [{ date, items: [text] }]. */
-export function changelogSections(text) {
-  const sections = [];
-  for (const line of lf(text || '').split('\n')) {
-    if (line.startsWith('## ')) sections.push({ date: line.slice(3).trim(), items: [] });
-    else if (sections.length && line.startsWith('- ')) sections.at(-1).items.push(line.slice(2).trim());
-    else if (sections.at(-1)?.items.length && /^\s+\S/.test(line)) sections.at(-1).items.push(`${sections.at(-1).items.pop()} ${line.trim()}`);
-  }
-  return sections;
-}
-
-/**
- * What's new between two versions: the changelog lines the newer one has and
- * the older one doesn't. With no older changelog to compare against, just the
- * newest section.
- */
-export function whatsNew(newer, older) {
-  const now = changelogSections(newer);
-  if (older === null) return now[0]?.items || [];
-  const seen = new Set(changelogSections(older).flatMap((x) => x.items));
-  return now.flatMap((x) => x.items).filter((item) => !seen.has(item));
+  return { version, files, base };
 }
 
 /** Three-way merge with git: { text, clean }, or null when git isn't installed. */
@@ -1507,14 +1477,8 @@ async function cmdUpdate(root, flags, rest) {
     console.log('Some of its files differ from devcontainer-plus (an older copy, or changes of your own), so they\'ll be replaced. '
       + (backups.length === replaced.length ? 'The old ones are kept beside them as .orig files.' : '`git diff .devcontainer` will show what changed.'));
   }
-  if (record?.version && template.version) {
-    const news = whatsNew(await template.changelog(template.version), await template.changelog(record.version));
-    if (news.length) {
-      console.log("What's new:");
-      for (const item of news) console.log(`  - ${item.replace(/`dc (?=\w)/g, `\`${NAME} `)}`);
-    }
-  }
-  if (!(await confirm('A newer devcontainer-plus is out. Update this project\'s dev container?', flags))) return 1;
+  console.log(`A newer devcontainer-plus is out. What's new: ${WHATS_NEW}`);
+  if (!(await confirm('Update this project\'s dev container?', flags))) return 1;
 
   for (const p of plan) {
     const path = join(target, p.name);
