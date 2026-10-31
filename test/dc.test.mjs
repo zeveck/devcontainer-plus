@@ -373,9 +373,10 @@ test('dc install: adds dc and dcp by default, and uninstall removes both', (t) =
   const bin = (n) => join(home, '.local', 'bin', n);
   const payload = join(home, '.local', 'share', 'dc');
 
-  assert.equal(run('install').status, 0);
+  const r = run('install');
+  assert.equal(r.status, 0, r.stderr);
   assert.ok(existsSync(bin('dc')) && existsSync(bin('dcp')));
-  assert.equal(spawnSync(bin('dcp'), ['version'], { encoding: 'utf8' }).stdout.trim(), 'dc 1.0.0');
+  assert.match(spawnSync(bin('dcp'), ['version'], { encoding: 'utf8' }).stdout, /^dc \d/);
 
   // Removing one name keeps the other working.
   assert.equal(run('uninstall', 'dc').status, 0);

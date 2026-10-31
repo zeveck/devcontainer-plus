@@ -1281,7 +1281,12 @@ const installPaths = (names) => IS_WIN
 
 // With no name, install (and uninstall) both `dc` and `dcp`. `dcp` is there for
 // anyone whose `dc` is already taken, such as by the POSIX desk calculator.
-const installNames = (rest) => rest[0] ? [rest[0].replace(/[^\w.-]/g, '')] : ['dc', 'dcp'];
+function installNames(rest) {
+  if (!rest[0]) return ['dc', 'dcp'];
+  const name = rest[0].replace(/[^\w.-]/g, '');
+  if (!name || /^\.+$/.test(name)) throw new Error(`"${rest[0]}" can't be a command name. Try letters, like dc install dcx.`);
+  return [name];
+}
 
 /** Body for a generated shim, with the payload path baked in absolutely. */
 export function shimBody(kind, target) {
@@ -1331,7 +1336,9 @@ function cmdInstall(flags, rest) {
     console.log(`\nNOTE: ${binDir} is not on your PATH. Add to your shell profile:`);
     console.log(`  export PATH="${binDir}:$PATH"`);
   }
-  if (calculator) {
+  // Only say so if ours is now the one that runs; otherwise nothing is hidden.
+  const found = calculator && capture('which', ['dc']).stdout?.trim();
+  if (found && normalizeLocalFolder(found) === normalizeLocalFolder(join(binDir, 'dc'))) {
     console.log('\nNOTE: your system already had a `dc` command (a desk calculator), and this one now hides it.');
     console.log('To get the calculator back, run `dcp uninstall dc` and use `dcp` instead.');
   }
