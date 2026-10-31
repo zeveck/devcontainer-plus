@@ -1,4 +1,4 @@
-// The site built from CHANGELOG.md: each entry's headline and words, dated, escaped.
+// The site built from WHATS-NEW.md: each entry's headline and words, dated, escaped.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -13,8 +13,8 @@ test('the What\'s new page shows every entry, headline first, with dates written
   assert.match(homePage(log), /Latest: October 31, 2026[\s\S]*Snap it/);
 });
 
-test('every entry in the real changelog has a headline and a date', () => {
-  const all = sections(readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8'));
+test('every entry in WHATS-NEW.md has a headline and a date', () => {
+  const all = sections(readFileSync(new URL('../WHATS-NEW.md', import.meta.url), 'utf8'));
   assert.ok(all.length > 0);
   for (const s of all) {
     assert.match(s.date, /^\d{4}-\d{2}-\d{2}$/);

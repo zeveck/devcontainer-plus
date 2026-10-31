@@ -1,4 +1,4 @@
-// Builds the devcontainer-plus site (dcp.synapticnoise.com) from CHANGELOG.md:
+// Builds the devcontainer-plus site (dcp.synapticnoise.com) from WHATS-NEW.md:
 // a short home page and a What's new page. No dependencies; run by the Pages
 // workflow as `node site/build.mjs <output folder>`.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -65,7 +65,7 @@ ${body}
 
 export function whatsNewPage(changelog) {
   const body = sections(changelog).map((s) => `<h2>${escape(longDate(s.date))}</h2>\n<ul>\n${s.items.map((i) => `  <li>${inline(i)}</li>`).join('\n')}\n</ul>`).join('\n');
-  return page("What's new in devcontainer-plus", `<h1>What's new</h1>\n<p class="lead">Changes to devcontainer-plus, newest first. In a project, <code>dcp update</code> brings them in.</p>\n${body}`);
+  return page("What's new in devcontainer-plus", `<h1>What's new</h1>\n<p class="lead">The highlights, newest first. In a project, <code>dcp update</code> brings them in.</p>\n${body}`);
 }
 
 export function homePage(changelog) {
@@ -75,12 +75,12 @@ export function homePage(changelog) {
 <div class="panel">
 <p>Get started on <a href="${REPO}#getting-started">GitHub</a>. Already using it? In your project, run <code>dcp update</code> to get the latest.</p>
 </div>
-${latest ? `<h2>Latest: ${escape(longDate(latest.date))}</h2>\n<ul>\n${latest.items.slice(0, 3).map((i) => `  <li>${inline(i)}</li>`).join('\n')}\n</ul>\n<p><a href="/whats-new/">Everything that's new</a></p>` : ''}`);
+${latest ? `<h2>Latest: ${escape(longDate(latest.date))}</h2>\n<ul>\n${latest.items.slice(0, 3).map((i) => `  <li>${inline(i)}</li>`).join('\n')}\n</ul>\n<p><a href="/whats-new/">All the highlights</a></p>` : ''}`);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const out = process.argv[2] || join(ROOT, '_site');
-  const changelog = readFileSync(join(ROOT, 'CHANGELOG.md'), 'utf8');
+  const changelog = readFileSync(join(ROOT, 'WHATS-NEW.md'), 'utf8');
   mkdirSync(join(out, 'whats-new'), { recursive: true });
   writeFileSync(join(out, 'index.html'), homePage(changelog));
   writeFileSync(join(out, 'whats-new', 'index.html'), whatsNewPage(changelog));

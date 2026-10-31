@@ -1,11 +1,11 @@
 name: Deploy the site
 
 # Builds dcp.synapticnoise.com (the home and What's new pages) from
-# CHANGELOG.md, whenever it or the site changes.
+# WHATS-NEW.md, whenever it or the site changes.
 on:
   push:
     branches: [main]
-    paths: [CHANGELOG.md, site/**, .github/workflows/pages.yml]
+    paths: [WHATS-NEW.md, site/**, .github/workflows/pages.yml]
   workflow_dispatch:
 
 permissions:
