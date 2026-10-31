@@ -378,7 +378,10 @@ test('dc install: adds dc and dcp by default, and uninstall removes both', (t) =
   const r = run('install');
   assert.equal(r.status, 0, r.stderr);
   assert.ok(existsSync(bin('dc')) && existsSync(bin('dcp')));
-  assert.match(spawnSync(bin('dcp'), ['version'], { encoding: 'utf8' }).stdout, /^dc \d/);
+  // Each name says itself in its messages.
+  assert.match(spawnSync(bin('dcp'), ['version'], { encoding: 'utf8' }).stdout, /^dcp \d/);
+  assert.match(spawnSync(bin('dc'), ['version'], { encoding: 'utf8' }).stdout, /^dc \d/);
+  assert.match(spawnSync(bin('dcp'), ['frobnicate'], { encoding: 'utf8' }).stderr, /^dcp: /);
 
   // Removing one name keeps the other working.
   assert.equal(run('uninstall', 'dc').status, 0);
