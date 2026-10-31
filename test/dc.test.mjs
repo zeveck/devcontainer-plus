@@ -364,3 +364,23 @@ test('dc rm: unknown options are rejected, not ignored', (t) => {
   assert.match(r.stderr, /unknown option --volume/);
   assert.deepEqual(calls(), []);
 });
+
+test('dc install: adds dc and dcp by default, and uninstall removes both', (t) => {
+  if (posixOnly(t)) return;
+  const home = mkdtempSync(join(tmpdir(), 'dc-home-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const run = (...a) => spawnSync(process.execPath, [DC, ...a], { encoding: 'utf8', env: { ...process.env, HOME: home } });
+  const bin = (n) => join(home, '.local', 'bin', n);
+  const payload = join(home, '.local', 'share', 'dc');
+
+  assert.equal(run('install').status, 0);
+  assert.ok(existsSync(bin('dc')) && existsSync(bin('dcp')));
+  assert.equal(spawnSync(bin('dcp'), ['version'], { encoding: 'utf8' }).stdout.trim(), 'dc 1.0.0');
+
+  // Removing one name keeps the other working.
+  assert.equal(run('uninstall', 'dc').status, 0);
+  assert.ok(!existsSync(bin('dc')) && existsSync(bin('dcp')) && existsSync(payload));
+
+  assert.equal(run('uninstall').status, 0);
+  assert.ok(!existsSync(bin('dcp')) && !existsSync(payload));
+});

@@ -124,6 +124,8 @@ jobs:
         run: |
           node ./.devcontainer/dc.mjs install dctest
           node ./.devcontainer/dc.mjs uninstall dctest
+          node ./.devcontainer/dc.mjs install
+          node ./.devcontainer/dc.mjs uninstall
 
       # Windows only: uninstalling the last install must also remove the PATH
       # entry install registered, leaving the user PATH as it was found.

@@ -1,4 +1,4 @@
-# Dev Container for AI Coding Agents
+# devcontainer-plus
 
 A development container that's ready to work in, with Claude Code, Codex CLI, and Gemini CLI already installed and set up. Open a project, start an agent, get on with it.
 
@@ -32,7 +32,7 @@ There are two ways in, and they give you the same container. Use VS Code if you 
 Either way you need two things:
 
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (on Linux, plain Docker works too), and it has to actually be running.
-- The `.devcontainer` folder in your project. Clone this repo or [download it as a ZIP](https://github.com/zeveck/devcontainers/archive/refs/heads/main.zip), then copy the `.devcontainer` folder into your project folder.
+- The `.devcontainer` folder in your project. Clone this repo or [download it as a ZIP](https://github.com/zeveck/devcontainer-plus/archive/refs/heads/main.zip), then copy the `.devcontainer` folder into your project folder.
 
 ### With VS Code
 
@@ -62,7 +62,7 @@ Install `dc` itself from the project folder. This is once per machine, not per p
 ./.devcontainer/dc install      # macOS and Linux
 ```
 
-That puts a copy of `dc` on your PATH, so it works from anywhere and keeps working even if you delete the project it came from. Then:
+That puts a copy of `dc` on your PATH, so it works from anywhere and keeps working even if you delete the project it came from. It also answers to `dcp`, in case `dc` is already taken on your machine. Then:
 
 ```bash
 dc up          # first build takes a few minutes
@@ -112,7 +112,7 @@ dc doctor      check your setup
 
 When something won't start, run `dc doctor` first. It checks Docker, Node, and your project, and tells you which one is the problem.
 
-One thing to watch for on macOS and Linux: they already ship a small calculator program called `dc`, and this will hide it. If you use it, install under a different name with `dc install <name>`. To remove everything, run `dc uninstall` (with the name, if you installed under one).
+One thing to watch for on macOS and Linux: they already ship a small calculator program called `dc`, and this will hide it. If you use it, run `dcp uninstall dc` to give the calculator its name back and type `dcp` instead. To install under a name of your own, use `dc install <name>`. To remove everything, run `dc uninstall` (with the name, if you installed under one).
 
 ## Signing in to GitHub and GitLab
 

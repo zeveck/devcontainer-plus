@@ -1271,13 +1271,17 @@ function reportNoMatch(root) {
 // Windows gets BOTH shims. CMD cannot run a .ps1, and PowerShell going through
 // a .cmd loses arguments: PS does not quote a bare `a&b`, so cmd.exe splits on
 // the & and discards everything after it. Each shell needs its own entry point.
-const installPaths = (name = 'dc') => IS_WIN
+const installPaths = (names) => IS_WIN
   ? { payload: join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'Programs', 'dc'),
       binDir:  join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'Programs', 'dc'),
-      shims: [`${name}.cmd`, `${name}.ps1`] }
+      shims: names.flatMap((n) => [`${n}.cmd`, `${n}.ps1`]) }
   : { payload: join(homedir(), '.local', 'share', 'dc'),
       binDir:  join(homedir(), '.local', 'bin'),
-      shims: [name] };
+      shims: names };
+
+// With no name, install (and uninstall) both `dc` and `dcp`. `dcp` is there for
+// anyone whose `dc` is already taken, such as by the POSIX desk calculator.
+const installNames = (rest) => rest[0] ? [rest[0].replace(/[^\w.-]/g, '')] : ['dc', 'dcp'];
 
 /** Body for a generated shim, with the payload path baked in absolutely. */
 export function shimBody(kind, target) {
@@ -1287,9 +1291,11 @@ export function shimBody(kind, target) {
 }
 
 function cmdInstall(flags, rest) {
-  const name = (rest[0] || 'dc').replace(/[^\w.-]/g, '');
+  const names = installNames(rest);
   const link = flags.has('--link');
-  const { payload, binDir, shims } = installPaths(name);
+  const { payload, binDir, shims } = installPaths(names);
+  // Look before writing our own shim, which could otherwise be what `which` finds.
+  const calculator = !IS_WIN && names.includes('dc') && !existsSync(join(binDir, 'dc')) && has('dc');
   mkdirSync(binDir, { recursive: true });
 
   // --link points the shim at the repo copy so edits take effect immediately.
@@ -1325,26 +1331,25 @@ function cmdInstall(flags, rest) {
     console.log(`\nNOTE: ${binDir} is not on your PATH. Add to your shell profile:`);
     console.log(`  export PATH="${binDir}:$PATH"`);
   }
-  if (!IS_WIN && name === 'dc' && has('dc')) {
-    console.log('\nNOTE: a `dc` command already exists (POSIX desk calculator).');
-    console.log('This install shadows it. Re-run as `dc install dcx` to pick another name.');
+  if (calculator) {
+    console.log('\nNOTE: your system already had a `dc` command (a desk calculator), and this one now hides it.');
+    console.log('To get the calculator back, run `dcp uninstall dc` and use `dcp` instead.');
   }
   return 0;
 }
 
 function cmdUninstall(_flags, rest) {
-  const name = (rest[0] || 'dc').replace(/[^\w.-]/g, '');
-  const { payload, binDir, shims } = installPaths(name);
+  const { payload, binDir, shims } = installPaths(installNames(rest));
 
   let any = false;
   for (const shim of shims) {
     const shimPath = join(binDir, shim);
     if (existsSync(shimPath)) { rmSync(shimPath, { force: true }); console.log(`removed: ${shimPath}`); any = true; }
   }
-  if (!any) console.log(`not installed: ${join(binDir, shims[0])}`);
+  if (!any) console.log(`not installed: ${shims.map((f) => join(binDir, f)).join(', ')}`);
 
-  // Only drop the shared payload once no remaining shim references it — installing
-  // under a second name (dc install dcx) must not be broken by removing the first.
+  // Only drop the shared payload once no remaining shim references it — removing
+  // one name (dc uninstall dc) must not break the others.
   if (existsSync(payload)) {
     const target = join(payload, 'dc.mjs');
     const stillUsed = readdirSync(binDir).some((f) => {
@@ -1418,8 +1423,8 @@ const HELP = `dc — dev containers without VS Code
   dc status                        show this project's containers
   dc logs [--follow]               container logs
   dc doctor                        check prerequisites
-  dc install [name] [--link]       install to your PATH
-  dc uninstall [name]              remove it
+  dc install [name] [--link]       install to your PATH (as dc and dcp, or just [name])
+  dc uninstall [name]              remove it (both names, or just [name])
 `;
 
 const FORWARDING = new Set(['exec', 'claude', 'codex', 'gemini', 'pw']);
