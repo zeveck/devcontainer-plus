@@ -125,8 +125,7 @@ test("dc update: devcontainer-plus's own files are simply replaced, never merged
   const r = s.update();
   assert.equal(r.status, 0, r.stderr);
   assert.equal(s.read('dc.mjs'), 'one\ntheirs\n');
-  assert.equal(s.read('dc.mjs.orig'), 'one\nmine\n', 'outside git, the old copy is kept');
+  assert.ok(!existsSync(join(s.proj, '.devcontainer', 'dc.mjs.orig')), 'no backup of it either');
   assert.ok(!existsSync(join(s.proj, '.devcontainer', 'dc.mjs.new')), 'an old .new beside it is cleared');
-  assert.match(r.stdout, /^dc\.mjs had changed since the last update, so the old copy is kept as \.orig\./m);
-  assert.doesNotMatch(r.stdout, /overlap|\.new/, 'no question about merging it');
+  assert.doesNotMatch(r.stdout, /dc\.mjs/, 'and nothing about it is said');
 });

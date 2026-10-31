@@ -1466,7 +1466,9 @@ async function cmdUpdate(root, flags, rest) {
     const was = recorded[f.name];
     const item = { name: f.name, text: f.text, executable: f.executable, existing: mine };
     if (was && fingerprint(mine) === was) { plan.push({ ...item, action: 'update' }); continue; }
-    if (!was || !CUSTOMISED[f.name]) { plan.push({ ...item, action: 'replace', backup: !gitHasIt(path) }); continue; }
+    // devcontainer-plus's own files are simply updated: nobody edits them.
+    if (!CUSTOMISED[f.name]) { plan.push({ ...item, action: 'update' }); continue; }
+    if (!was) { plan.push({ ...item, action: 'replace', backup: !gitHasIt(path) }); continue; }
     // You changed it. Merge with the template's changes if we know where it started.
     const base = record.version ? await template.base(f.name, record.version) : null;
     if (base === null || fingerprint(base) !== was) {
@@ -1511,12 +1513,7 @@ async function cmdUpdate(root, flags, rest) {
     const why = p.note === 'you both changed the same lines' ? 'overlap this update' : `can't be merged with this update (${p.note})`;
     console.log(`Your changes to ${p.name} (${CUSTOMISED[p.name]}) ${why}. Yours is kept as it is; the new version is saved as ${p.name}.new if you want to compare.`);
   }
-  // devcontainer-plus's own files are replaced without a word, unless a copy is
-  // kept, which would otherwise appear unexplained.
-  const kept = replaced.filter((x) => !CUSTOMISED[x.name] && x.backup).map((x) => x.name);
-  if (kept.length) console.log(`${kept.join(', ')} had changed since the last update, so the old ${kept.length === 1 ? 'copy is' : 'copies are'} kept as .orig. Delete ${kept.length === 1 ? 'it' : 'them'} if you don't need ${kept.length === 1 ? 'it' : 'them'}.`);
-  // Only the files people customise are worth a word when they're replaced.
-  for (const p of replaced.filter((x) => CUSTOMISED[x.name])) {
+  for (const p of replaced) {
     console.log(`${p.name} (${CUSTOMISED[p.name]}) is different here, so it'll be replaced. `
       + (p.backup ? `Your copy is kept as ${p.name}.orig.` : `\`git diff .devcontainer/${p.name}\` will show what changed, so you can put back anything of yours.`));
   }
