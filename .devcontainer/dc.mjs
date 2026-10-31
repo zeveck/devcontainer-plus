@@ -1403,6 +1403,41 @@ function gitHasIt(path) {
   return !r.error && r.status === 0 && tracked.status === 0;
 }
 
+/** The record of what was installed, for the next `update` to compare against. */
+function templateRecord(template) {
+  return {
+    template: TEMPLATE_REPO,
+    version: template.version,
+    files: Object.fromEntries(template.files.map((f) => [f.name, fingerprint(f.text)])),
+  };
+}
+
+/** `init`: put the latest .devcontainer into a folder that doesn't have one. */
+async function cmdInit(rest) {
+  const root = process.cwd();
+  const target = join(root, '.devcontainer');
+  if (existsSync(target)) {
+    console.log(`This folder already has a .devcontainer. To bring it up to date: ${NAME} update`);
+    return 0;
+  }
+  console.log(rest[0] ? `Getting devcontainer-plus from ${resolve(rest[0])}...` : 'Getting the latest devcontainer-plus...');
+  let template;
+  try { template = await loadTemplate(rest[0]); }
+  catch (e) { console.error(`${NAME} init: ${e.message}`); return 1; }
+  mkdirSync(target, { recursive: true });
+  for (const f of template.files) {
+    const path = join(target, f.name);
+    writeFileSync(path, withEol(f.name, f.text));
+    if (f.executable && !IS_WIN) chmodSync(path, 0o755);
+  }
+  writeFileSync(join(target, RECORD), JSON.stringify(templateRecord(template), null, 2) + '\n');
+  const parent = findProjectRoot(dirname(root));
+  console.log(`Added devcontainer-plus to ${root}.`);
+  if (parent) console.log(`(${parent} has its own .devcontainer too; this one is just for this folder.)`);
+  console.log(`Next: ${NAME} up, then ${NAME} claude. What's in it: https://dcp.synapticnoise.com/`);
+  return 0;
+}
+
 async function cmdUpdate(root, flags, rest) {
   const target = join(root, '.devcontainer');
   const origin = spawnSync('git', ['-C', root, 'remote', 'get-url', 'origin'], { encoding: 'utf8' });
@@ -1448,11 +1483,7 @@ async function cmdUpdate(root, flags, rest) {
   }
   const leftovers = readdirSync(target).filter((n) => n.endsWith('.new') && !plan.some((p) => p.action === 'keep' && `${p.name}.new` === n));
 
-  const newRecord = {
-    template: TEMPLATE_REPO,
-    version: template.version,
-    files: Object.fromEntries(template.files.map((f) => [f.name, fingerprint(f.text)])),
-  };
+  const newRecord = templateRecord(template);
   const remindLeftovers = () => {
     for (const n of leftovers) console.log(`${n} is still here from an earlier update: compare it with ${n.slice(0, -4)}, keep what you want, then delete it.`);
   };
@@ -1665,6 +1696,7 @@ const HELP = `${NAME} — dev containers without VS Code
   ${NAME} restore <name> [--quick]      put a snapshot back (--yes: don't ask)
   ${NAME} status                        show this project's containers
   ${NAME} logs [--follow]               container logs
+  ${NAME} init [template folder]        add devcontainer-plus to this folder
   ${NAME} update [template folder]      bring .devcontainer up to the latest template
   ${NAME} doctor                        check prerequisites
   ${NAME} install [name] [--link]       install to your PATH (as ${NAME} and dcp, or just [name])
@@ -1718,6 +1750,10 @@ async function main(argv) {
     return preflight() ? cmdPrune(flags) : 1;
   }
 
+  if (cmd === 'init') {
+    if (flags.size) { console.error(`${NAME} init: unknown option ${[...flags].join(' ')}`); return 1; }
+    return cmdInit(rest);
+  }
   if (cmd === 'update') {
     const unknown = [...flags].filter((f) => f !== '--yes');
     if (unknown.length) { console.error(`${NAME} update: unknown option ${unknown.join(' ')}`); return 1; }

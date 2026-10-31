@@ -7,6 +7,7 @@ words, under the date it's released.
 
 ## 2026-10-31
 
+- **Start a project in one command.** In a new project folder, `dcp init` adds the latest devcontainer-plus. No more copying folders around.
 - **Update in one command.** In a project, `dcp update` brings its dev container up to the latest devcontainer-plus. Changes you've made yourself are kept.
 - **What's new, in one place.** This page lists every change in plain words, and `dcp update` links here.
 - **Rebuilds that don't cut work off.** Before rebuilding, stopping or removing a container, `dcp` checks whether Claude or anything else is busy in it, and asks first if so.

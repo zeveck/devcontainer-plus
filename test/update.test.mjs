@@ -98,3 +98,20 @@ test("dc update: a change of yours it can't merge is kept, with the reason", (t)
   assert.equal(s.read('setup.sh'), SETUP.replace('echo one', 'echo mine'));
   assert.match(s.update().stdout, /setup\.sh\.new is still here/);
 });
+
+test('dc init: adds the template to a folder without one, and leaves an existing one alone', (t) => {
+  const s = setup(t);
+  const fresh = join(s.proj, '..', 'fresh');
+  mkdirSync(fresh);
+  const init = () => spawnSync(process.execPath, [DC, 'init', join(s.proj, '..', 'template')], { cwd: fresh, encoding: 'utf8' });
+  let r = init();
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(readFileSync(join(fresh, '.devcontainer', 'setup.sh'), 'utf8'), SETUP);
+  assert.ok(existsSync(join(fresh, '.devcontainer', '.dcp.json')));
+  // And dc update then finds it up to date.
+  assert.match(spawnSync(process.execPath, [DC, 'update', join(s.proj, '..', 'template')], { cwd: fresh, encoding: 'utf8' }).stdout, /is up to date/);
+  writeFileSync(join(fresh, '.devcontainer', 'setup.sh'), 'mine\n');
+  r = init();
+  assert.match(r.stdout, /already has a \.devcontainer/);
+  assert.equal(readFileSync(join(fresh, '.devcontainer', 'setup.sh'), 'utf8'), 'mine\n');
+});

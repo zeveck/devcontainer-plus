@@ -35,7 +35,7 @@ There are two ways in, and they give you the same container. Use VS Code if you 
 Either way you need two things:
 
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (on Linux, plain Docker works too), and it has to actually be running.
-- The `.devcontainer` folder in your project. Clone this repo or [download it as a ZIP](https://github.com/zeveck/devcontainer-plus/archive/refs/heads/main.zip), then copy the `.devcontainer` folder into your project folder.
+- The `.devcontainer` folder in your project. Clone this repo or [download it as a ZIP](https://github.com/zeveck/devcontainer-plus/archive/refs/heads/main.zip), then copy the `.devcontainer` folder into your project folder. Once you have the `dc` command (below), `dc init` in a project folder does this for you.
 
 ### With VS Code
 
@@ -110,6 +110,7 @@ dc forward     reach a port in the container    (see below)
 dc snapshot    save this moment to come back to (see below; dc restore goes back)
 dc status      show this project's container
 dc logs        show its output                  (--follow to keep watching)
+dc init        add devcontainer-plus to this folder
 dc update      get the latest devcontainer-plus (see below)
 dc doctor      check your setup
 ```
@@ -262,7 +263,7 @@ The whole configuration is a handful of files in `.devcontainer/`:
 
 To add or remove software, edit `setup.sh` and rebuild the container.
 
-Claude Code also gets a status line under the prompt: the model, how much of the conversation's context is used, and how much of your 5-hour and 7-day usage limits is gone, each as a bar that turns yellow and then red. It's only added if your Claude settings don't have a status line already. To leave it out, uncomment `NO_STATUSLINE=1` in `setup.sh` and rebuild.
+Claude Code also gets a status line under the prompt: the model, how much of the conversation's context is used, and how much of your 5-hour and 7-day usage limits is gone, each as a bar that turns yellow and then red. It's only added if your Claude settings don't have a status line already; one you've set up yourself is never replaced. To use this one instead, remove your `statusLine` setting from `~/.claude/settings.json` in the container and rebuild. To leave it out, uncomment `NO_STATUSLINE=1` in `setup.sh` and rebuild.
 
 Claude Code normally compacts a long conversation while you're away from it, so you come back to a summary. The container turns that off, unless your Claude settings already say either way. To keep it on, uncomment `KEEP_IDLE_COMPACTION=1` in `setup.sh` and rebuild, or remove the `"idleCompaction": false` line from `~/.claude/settings.json` in the container.
 
