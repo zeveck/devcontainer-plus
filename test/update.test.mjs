@@ -67,7 +67,7 @@ test('dc update: when you and the template changed the same lines, yours stays a
   assert.equal(r.status, 0, r.stderr);
   assert.equal(s.read('setup.sh'), SETUP.replace('echo three', 'echo my three'));
   assert.equal(s.read('setup.sh.new'), SETUP.replace('echo three', 'echo their three'));
-  assert.match(r.stdout, /setup\.sh has changes of yours that overlap the update/);
+  assert.match(r.stdout, /Your changes to setup\.sh \(the build steps\) overlap this update\./);
 });
 
 test('dc update: line endings alone are not a change', (t) => {
@@ -94,7 +94,7 @@ test("dc update: a change of yours it can't merge is kept, with the reason", (t)
   s.release({ 'setup.sh': SETUP.replace('echo five', 'echo five, improved') });
   const r = s.update();
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /setup\.sh has changes of yours, and the version it came from couldn't be found/);
+  assert.match(r.stdout, /Your changes to setup\.sh \(the build steps\) can't be merged with this update/);
   assert.equal(s.read('setup.sh'), SETUP.replace('echo one', 'echo mine'));
   assert.match(s.update().stdout, /setup\.sh\.new is still here/);
 });
@@ -114,4 +114,19 @@ test('dc init: adds the template to a folder without one, and leaves an existing
   r = init();
   assert.match(r.stdout, /already has a \.devcontainer/);
   assert.equal(readFileSync(join(fresh, '.devcontainer', 'setup.sh'), 'utf8'), 'mine\n');
+});
+
+test("dc update: devcontainer-plus's own files are simply replaced, never merged or questioned", (t) => {
+  const s = setup(t);
+  s.release({ 'dc.mjs': 'one\ntwo\n' });
+  assert.equal(s.update().status, 0);
+  s.write({ 'dc.mjs': 'one\nmine\n', 'dc.mjs.new': 'stale\n' });
+  s.release({ 'dc.mjs': 'one\ntheirs\n' });
+  const r = s.update();
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(s.read('dc.mjs'), 'one\ntheirs\n');
+  assert.equal(s.read('dc.mjs.orig'), 'one\nmine\n', 'outside git, the old copy is kept');
+  assert.ok(!existsSync(join(s.proj, '.devcontainer', 'dc.mjs.new')), 'an old .new beside it is cleared');
+  assert.match(r.stdout, /^dc\.mjs had changed since the last update, so the old copy is kept as \.orig\./m);
+  assert.doesNotMatch(r.stdout, /overlap|\.new/, 'no question about merging it');
 });
