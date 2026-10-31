@@ -1347,7 +1347,11 @@ async function loadTemplate(from) {
         const r = git('show', `${v}:.devcontainer/${name}`);
         return r.status === 0 ? r.stdout : null;
       };
-      return { version, files, base };
+      const changelog = (v) => {
+        const r = git('show', `${v}:CHANGELOG.md`);
+        return r.status === 0 ? r.stdout : null;
+      };
+      return { version, files, base, changelog };
     }
     // A plain folder: no versions, so changes here can't be merged later.
     const files = readdirSync(join(dir, '.devcontainer'), { withFileTypes: true })
@@ -1356,7 +1360,8 @@ async function loadTemplate(from) {
         const path = join(dir, '.devcontainer', e.name);
         return { name: e.name, text: readFileSync(path, 'utf8'), executable: (statSync(path).mode & 0o111) !== 0 };
       });
-    return { version: null, files, base: () => null };
+    const log = join(dir, 'CHANGELOG.md');
+    return { version: null, files, base: () => null, changelog: (v) => (v === null && existsSync(log) ? readFileSync(log, 'utf8') : null) };
   }
   const offline = 'You can also use a local copy of devcontainer-plus: dc update <folder>';
   const get = async (url) => {
@@ -1379,7 +1384,33 @@ async function loadTemplate(from) {
   const base = async (name, v) => {
     try { return await (await get(raw(v, name))).text(); } catch { return null; }
   };
-  return { version, files, base };
+  const changelog = async (v) => {
+    try { return await (await get(`https://raw.githubusercontent.com/${TEMPLATE_REPO}/${v}/CHANGELOG.md`)).text(); } catch { return null; }
+  };
+  return { version, files, base, changelog };
+}
+
+/** A changelog's entries, newest section first: [{ date, items: [text] }]. */
+export function changelogSections(text) {
+  const sections = [];
+  for (const line of lf(text || '').split('\n')) {
+    if (line.startsWith('## ')) sections.push({ date: line.slice(3).trim(), items: [] });
+    else if (sections.length && line.startsWith('- ')) sections.at(-1).items.push(line.slice(2).trim());
+    else if (sections.at(-1)?.items.length && /^\s+\S/.test(line)) sections.at(-1).items.push(`${sections.at(-1).items.pop()} ${line.trim()}`);
+  }
+  return sections;
+}
+
+/**
+ * What's new between two versions: the changelog lines the newer one has and
+ * the older one doesn't. With no older changelog to compare against, just the
+ * newest section.
+ */
+export function whatsNew(newer, older) {
+  const now = changelogSections(newer);
+  if (older === null) return now[0]?.items || [];
+  const seen = new Set(changelogSections(older).flatMap((x) => x.items));
+  return now.flatMap((x) => x.items).filter((item) => !seen.has(item));
 }
 
 /** Three-way merge with git: { text, clean }, or null when git isn't installed. */
@@ -1411,7 +1442,7 @@ async function cmdUpdate(root, flags, rest) {
   }
   const recordPath = join(target, RECORD);
   const record = readJson(recordPath) || null;
-  console.log(rest[0] ? `Reading the template from ${resolve(rest[0])}...` : `Fetching the latest ${TEMPLATE_REPO}...`);
+  console.log(rest[0] ? `Checking ${resolve(rest[0])} for a newer devcontainer-plus...` : 'Checking for a newer devcontainer-plus...');
   let template;
   try { template = await loadTemplate(rest[0]); }
   catch (e) { console.error(`${NAME} update: ${e.message}`); return 1; }
@@ -1457,23 +1488,33 @@ async function cmdUpdate(root, flags, rest) {
   };
   if (!plan.length) {
     if (record?.version !== template.version || !record) writeFileSync(recordPath, JSON.stringify(newRecord, null, 2) + '\n');
-    console.log('Already up to date.');
+    console.log('This project\'s dev container is up to date.');
     remindLeftovers();
     return 0;
   }
 
-  const say = {
-    add: () => 'new',
-    update: () => 'updated',
-    merge: () => 'updated, keeping your changes',
-    replace: (p) => `replaced (it differs from the template: an older copy, or your own changes${p.backup ? `; your copy is kept as ${p.name}.orig` : ''})`,
-    keep: (p) => `kept as you have it, and the new version saved beside it as ${p.name}.new (${p.note})`,
-    remove: () => 'removed (the template no longer has it)',
-  };
-  console.log('');
-  for (const p of plan) console.log(`  ${p.name}: ${say[p.action](p)}`);
-  console.log('');
-  if (!(await confirm('Update .devcontainer?', flags))) return 1;
+  // Most people don't know these files, so name one only when it needs them:
+  // their own changes that overlap the update, or a first update replacing
+  // files that differ.
+  const keeps = plan.filter((p) => p.action === 'keep');
+  const replaced = plan.filter((p) => p.action === 'replace');
+  for (const p of keeps) {
+    const why = p.note === 'you both changed the same lines' ? 'has changes of yours that overlap the update' : `has changes of yours, and ${p.note}`;
+    console.log(`${p.name} ${why}, so yours stays as it is and the new version is saved beside it as ${p.name}.new to compare.`);
+  }
+  if (replaced.length) {
+    const backups = replaced.filter((p) => p.backup);
+    console.log('Some of its files differ from devcontainer-plus (an older copy, or changes of your own), so they\'ll be replaced. '
+      + (backups.length === replaced.length ? 'The old ones are kept beside them as .orig files.' : '`git diff .devcontainer` will show what changed.'));
+  }
+  if (record?.version && template.version) {
+    const news = whatsNew(await template.changelog(template.version), await template.changelog(record.version));
+    if (news.length) {
+      console.log("What's new:");
+      for (const item of news) console.log(`  - ${item.replace(/`dc (?=\w)/g, `\`${NAME} `)}`);
+    }
+  }
+  if (!(await confirm('A newer devcontainer-plus is out. Update this project\'s dev container?', flags))) return 1;
 
   for (const p of plan) {
     const path = join(target, p.name);
@@ -1486,12 +1527,7 @@ async function cmdUpdate(root, flags, rest) {
   writeFileSync(recordPath, JSON.stringify(newRecord, null, 2) + '\n');
 
   console.log(`Updated. Rebuild to use it: ${NAME} up --rebuild`);
-  if (plan.some((p) => p.action === 'replace' && !p.backup)) {
-    console.log('Files that differed were replaced. If any had changes of your own, `git diff .devcontainer` shows them, so you can put them back.');
-  }
-  if (plan.some((p) => p.action === 'keep')) {
-    console.log('Where a .new file was saved, compare it with yours, keep what you want from it, then delete it.');
-  }
+  if (keeps.length) console.log('Compare each .new file with yours, keep what you want from it, then delete it.');
   remindLeftovers();
   // The dc command on your PATH is a separate copy; say if it's now older.
   const installed = join(installPaths(['dc']).payload, 'dc.mjs');

@@ -23,10 +23,14 @@ function setup(t) {
       else writeFileSync(join(root, '.devcontainer', name), text);
     }
   };
-  const release = (files) => { write(tpl, files); git('add', '-A'); git('commit', '-qm', 'release'); };
+  const release = (files, news) => {
+    write(tpl, files);
+    if (news) writeFileSync(join(tpl, 'CHANGELOG.md'), `# What's new\n\n## 2026-11-01\n\n${news.map((n) => `- ${n}\n`).join('')}`);
+    git('add', '-A'); git('commit', '-qm', 'release');
+  };
   mkdirSync(join(tpl, '.devcontainer'), { recursive: true });
   spawnSync('git', ['init', '-q', '-b', 'main', tpl]);
-  release({ 'devcontainer.json': '{}\n', 'setup.sh': SETUP, 'old.sh': 'echo old\n' });
+  release({ 'devcontainer.json': '{}\n', 'setup.sh': SETUP, 'old.sh': 'echo old\n' }, ['`dc snapshot` saves a moment.']);
   const proj = join(dir, 'proj');
   mkdirSync(join(proj, '.devcontainer'), { recursive: true });
   writeFileSync(join(proj, '.devcontainer', 'devcontainer.json'), '{}\n');
@@ -47,14 +51,16 @@ test('dc update: first run adds the template, then a later one updates, merges a
 
   // You change one line; the template changes another, and drops old.sh.
   s.write({ 'setup.sh': SETUP.replace('echo one', 'echo mine') });
-  s.release({ 'setup.sh': SETUP.replace('echo five', 'echo five, improved'), 'devcontainer.json': '{"v": 2}\n', 'old.sh': null });
+  s.release({ 'setup.sh': SETUP.replace('echo five', 'echo five, improved'), 'devcontainer.json': '{"v": 2}\n', 'old.sh': null },
+    ['`dc update` brings it up to date.', '`dc snapshot` saves a moment.']);
   r = s.update();
   assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /What's new:\n  - `dc update` brings it up to date\.\n(?!  - `dc snapshot`)/, 'only the new line');
   assert.equal(s.read('setup.sh'), SETUP.replace('echo one', 'echo mine').replace('echo five', 'echo five, improved'));
   assert.equal(s.read('devcontainer.json'), '{"v": 2}\n');
   assert.ok(!existsSync(join(s.proj, '.devcontainer', 'old.sh')));
 
-  assert.match(s.update().stdout, /Already up to date/);
+  assert.match(s.update().stdout, /is up to date/);
 });
 
 test('dc update: when you and the template changed the same lines, yours stays and theirs is saved beside it', (t) => {
@@ -66,14 +72,14 @@ test('dc update: when you and the template changed the same lines, yours stays a
   assert.equal(r.status, 0, r.stderr);
   assert.equal(s.read('setup.sh'), SETUP.replace('echo three', 'echo my three'));
   assert.equal(s.read('setup.sh.new'), SETUP.replace('echo three', 'echo their three'));
-  assert.match(r.stdout, /setup\.sh: kept as you have it/);
+  assert.match(r.stdout, /setup\.sh has changes of yours that overlap the update/);
 });
 
 test('dc update: line endings alone are not a change', (t) => {
   const s = setup(t);
   assert.equal(s.update().status, 0);
   s.write({ 'setup.sh': SETUP.replace(/\n/g, '\r\n') });
-  assert.match(s.update().stdout, /Already up to date/);
+  assert.match(s.update().stdout, /is up to date/);
 });
 
 test('dc update: without a yes, nothing is written', (t) => {
@@ -93,7 +99,7 @@ test("dc update: a change of yours it can't merge is kept, with the reason", (t)
   s.release({ 'setup.sh': SETUP.replace('echo five', 'echo five, improved') });
   const r = s.update();
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /setup\.sh: kept as you have it.*couldn't be found/);
+  assert.match(r.stdout, /setup\.sh has changes of yours, and the version it came from couldn't be found/);
   assert.equal(s.read('setup.sh'), SETUP.replace('echo one', 'echo mine'));
   assert.match(s.update().stdout, /setup\.sh\.new is still here/);
 });
