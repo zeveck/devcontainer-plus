@@ -9,12 +9,12 @@
 // installed copy works in any project.
 
 import { spawn, spawnSync, execFile } from 'node:child_process';
-import { existsSync, mkdirSync, copyFileSync, writeFileSync, rmSync, chmodSync, readdirSync, readFileSync, renameSync, appendFileSync, linkSync, statSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, copyFileSync, writeFileSync, rmSync, chmodSync, readdirSync, readFileSync, renameSync, appendFileSync, linkSync, statSync, realpathSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { dirname, join, posix, resolve, win32 } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { homedir, networkInterfaces, platform } from 'node:os';
+import { homedir, networkInterfaces, platform, tmpdir } from 'node:os';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const IS_WIN = platform() === 'win32';
@@ -1298,6 +1298,206 @@ function reportNoMatch(root) {
   console.log('  please report it.');
 }
 
+// ── update ──────────────────────────────────────────────────────────────────
+//
+// `dc update [template folder]` brings this project's .devcontainer up to the
+// latest devcontainer-plus: from GitHub, or from a local copy of its repository.
+// .devcontainer/.dcp.json records which template version each file came from,
+// so a file you changed is merged with the template's changes instead of
+// overwritten. Files that aren't the template's are left alone.
+
+const TEMPLATE_REPO = 'zeveck/devcontainer-plus';
+const RECORD = '.dcp.json';
+// Line endings don't count as a change: a Windows checkout has CRLF.
+const lf = (text) => text.replace(/\r\n/g, '\n');
+const fingerprint = (text) => createHash('sha256').update(lf(text)).digest('hex');
+// Write with the line endings the file had here, or the template's own rule
+// (CRLF for Windows scripts) for a new file.
+const withEol = (name, text, existing) => {
+  const crlf = existing === undefined ? /\.(cmd|ps1)$/.test(name) : existing.includes('\r\n');
+  return crlf ? lf(text).replace(/\n/g, '\r\n') : lf(text);
+};
+
+/** The template, from GitHub or a local clone: { version, files: [{ name, text, executable }], base(name, version) }. */
+async function loadTemplate(from) {
+  if (from) {
+    const dir = resolve(from);
+    if (!existsSync(join(dir, '.devcontainer', 'devcontainer.json'))) {
+      throw new Error(`${dir} doesn't look like devcontainer-plus (no .devcontainer/devcontainer.json in it).`);
+    }
+    const git = (...a) => spawnSync('git', ['-C', dir, ...a], { encoding: 'utf8' });
+    const head = git('rev-parse', 'HEAD');
+    if (head.status === 0) {
+      // A clone: read its last commit, so the version recorded matches the files.
+      const version = head.stdout.trim();
+      const listing = git('ls-tree', version, '.devcontainer/').stdout.split('\n').filter(Boolean);
+      const files = listing.map((line) => {
+        const [meta, path] = line.split('\t');
+        const name = path.slice('.devcontainer/'.length);
+        return { name, text: git('show', `${version}:${path}`).stdout, executable: meta.startsWith('100755') };
+      }).filter((f) => f.name !== RECORD);
+      if (git('status', '--porcelain', '.devcontainer').stdout.trim()) {
+        console.log(`  (${dir} has uncommitted changes in .devcontainer; using its last commit.)`);
+      }
+      const base = (name, v) => {
+        const r = git('show', `${v}:.devcontainer/${name}`);
+        return r.status === 0 ? r.stdout : null;
+      };
+      return { version, files, base };
+    }
+    // A plain folder: no versions, so changes here can't be merged later.
+    const files = readdirSync(join(dir, '.devcontainer'), { withFileTypes: true })
+      .filter((e) => e.isFile() && e.name !== RECORD && !/\.(new|orig)$/.test(e.name))
+      .map((e) => {
+        const path = join(dir, '.devcontainer', e.name);
+        return { name: e.name, text: readFileSync(path, 'utf8'), executable: (statSync(path).mode & 0o111) !== 0 };
+      });
+    return { version: null, files, base: () => null };
+  }
+  const offline = 'You can also use a local copy of devcontainer-plus: dc update <folder>';
+  const get = async (url) => {
+    let r;
+    try { r = await fetch(url, { headers: { 'User-Agent': 'dc-update' } }); }
+    catch (e) { throw new Error(`couldn't reach GitHub (${e.cause?.code || e.message}). Check your connection. ${offline}`); }
+    if (r.status === 403 || r.status === 429) throw new Error(`GitHub is limiting requests for now (it allows 60 an hour without signing in). Try again later. ${offline}`);
+    if (!r.ok) throw new Error(`GitHub answered ${r.status} for ${url}. ${offline}`);
+    return r;
+  };
+  const raw = (v, name) => `https://raw.githubusercontent.com/${TEMPLATE_REPO}/${v}/.devcontainer/${name}`;
+  const version = (await (await get(`https://api.github.com/repos/${TEMPLATE_REPO}/commits/main`)).json()).sha;
+  const tree = (await (await get(`https://api.github.com/repos/${TEMPLATE_REPO}/git/trees/${version}?recursive=1`)).json()).tree;
+  if (!version || !Array.isArray(tree)) throw new Error(`GitHub's answer didn't list the template's files. ${offline}`);
+  const entries = tree.filter((e) => e.type === 'blob' && /^\.devcontainer\/[^/]+$/.test(e.path));
+  const files = await Promise.all(entries.map(async (e) => {
+    const name = e.path.slice('.devcontainer/'.length);
+    return { name, text: await (await get(raw(version, name))).text(), executable: e.mode === '100755' };
+  }));
+  const base = async (name, v) => {
+    try { return await (await get(raw(v, name))).text(); } catch { return null; }
+  };
+  return { version, files, base };
+}
+
+/** Three-way merge with git: { text, clean }, or null when git isn't installed. */
+function merge3(mine, base, theirs) {
+  const dir = mkdtempSync(join(tmpdir(), 'dc-merge-'));
+  try {
+    const f = (n, t) => { const p = join(dir, n); writeFileSync(p, lf(t)); return p; };
+    const r = spawnSync('git', ['merge-file', '-p', f('mine', mine), f('base', base), f('theirs', theirs)], { encoding: 'utf8' });
+    if (r.error) return null;
+    return { text: r.stdout, clean: r.status === 0 };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** Whether git holds this file exactly as it is, so replacing it loses nothing. */
+function gitHasIt(path) {
+  const r = spawnSync('git', ['-C', dirname(path), 'diff', '--quiet', 'HEAD', '--', path], { encoding: 'utf8' });
+  const tracked = spawnSync('git', ['-C', dirname(path), 'ls-files', '--error-unmatch', path], { encoding: 'utf8' });
+  return !r.error && r.status === 0 && tracked.status === 0;
+}
+
+async function cmdUpdate(root, flags, rest) {
+  const target = join(root, '.devcontainer');
+  const origin = spawnSync('git', ['-C', root, 'remote', 'get-url', 'origin'], { encoding: 'utf8' });
+  if (/zeveck\/devcontainer(s|-plus)(\.git)?\s*$/.test(origin.stdout || '') || (rest[0] && resolve(rest[0]) === root)) {
+    console.log('This is devcontainer-plus itself, so there\'s nothing to update. Run dc update in a project that uses it.');
+    return 0;
+  }
+  const recordPath = join(target, RECORD);
+  const record = readJson(recordPath) || null;
+  console.log(rest[0] ? `Reading the template from ${resolve(rest[0])}...` : `Fetching the latest ${TEMPLATE_REPO}...`);
+  let template;
+  try { template = await loadTemplate(rest[0]); }
+  catch (e) { console.error(`dc update: ${e.message}`); return 1; }
+
+  const plan = []; // { name, action, text?, executable?, note?, existing? }
+  const recorded = record?.files || {};
+  for (const f of template.files) {
+    const path = join(target, f.name);
+    const now = fingerprint(f.text);
+    if (!existsSync(path)) { plan.push({ name: f.name, action: 'add', text: f.text, executable: f.executable }); continue; }
+    const mine = readFileSync(path, 'utf8');
+    if (fingerprint(mine) === now) continue; // already the latest
+    const was = recorded[f.name];
+    const item = { name: f.name, text: f.text, executable: f.executable, existing: mine };
+    if (was && fingerprint(mine) === was) { plan.push({ ...item, action: 'update' }); continue; }
+    if (!was) { plan.push({ ...item, action: 'replace', backup: !gitHasIt(path) }); continue; }
+    // You changed it. Merge with the template's changes if we know where it started.
+    const base = record.version ? await template.base(f.name, record.version) : null;
+    if (base === null || fingerprint(base) !== was) {
+      plan.push({ ...item, action: 'keep', note: 'the version it came from couldn\'t be found, so it couldn\'t be merged' });
+      continue;
+    }
+    const merged = merge3(mine, base, f.text);
+    if (!merged) { plan.push({ ...item, action: 'keep', note: 'merging needs git, which isn\'t installed' }); continue; }
+    if (!merged.clean) { plan.push({ ...item, action: 'keep', note: 'you both changed the same lines' }); continue; }
+    if (fingerprint(merged.text) !== fingerprint(mine)) plan.push({ ...item, action: 'merge', text: merged.text });
+  }
+  const names = new Set(template.files.map((f) => f.name));
+  for (const [name, was] of Object.entries(recorded)) {
+    const path = join(target, name);
+    if (names.has(name) || !existsSync(path)) continue;
+    if (fingerprint(readFileSync(path, 'utf8')) === was) plan.push({ name, action: 'remove' });
+  }
+  const leftovers = readdirSync(target).filter((n) => n.endsWith('.new') && !plan.some((p) => p.action === 'keep' && `${p.name}.new` === n));
+
+  const newRecord = {
+    template: TEMPLATE_REPO,
+    version: template.version,
+    files: Object.fromEntries(template.files.map((f) => [f.name, fingerprint(f.text)])),
+  };
+  const remindLeftovers = () => {
+    for (const n of leftovers) console.log(`${n} is still here from an earlier update: compare it with ${n.slice(0, -4)}, keep what you want, then delete it.`);
+  };
+  if (!plan.length) {
+    if (record?.version !== template.version || !record) writeFileSync(recordPath, JSON.stringify(newRecord, null, 2) + '\n');
+    console.log('Already up to date.');
+    remindLeftovers();
+    return 0;
+  }
+
+  const say = {
+    add: () => 'new',
+    update: () => 'updated',
+    merge: () => 'updated, keeping your changes',
+    replace: (p) => `replaced (it differs from the template: an older copy, or your own changes${p.backup ? `; your copy is kept as ${p.name}.orig` : ''})`,
+    keep: (p) => `kept as you have it, and the new version saved beside it as ${p.name}.new (${p.note})`,
+    remove: () => 'removed (the template no longer has it)',
+  };
+  console.log('');
+  for (const p of plan) console.log(`  ${p.name}: ${say[p.action](p)}`);
+  console.log('');
+  if (!(await confirm('Update .devcontainer?', flags))) return 1;
+
+  for (const p of plan) {
+    const path = join(target, p.name);
+    if (p.action === 'remove') { rmSync(path, { force: true }); continue; }
+    if (p.action === 'keep') { writeFileSync(`${path}.new`, withEol(p.name, p.text, p.existing)); continue; }
+    if (p.backup) writeFileSync(`${path}.orig`, p.existing);
+    writeFileSync(path, withEol(p.name, p.text, p.existing));
+    if (p.executable && !IS_WIN) chmodSync(path, 0o755);
+  }
+  writeFileSync(recordPath, JSON.stringify(newRecord, null, 2) + '\n');
+
+  console.log('Updated. Rebuild to use it: dc up --rebuild');
+  if (plan.some((p) => p.action === 'replace' && !p.backup)) {
+    console.log('Files that differed were replaced. If any had changes of your own, `git diff .devcontainer` shows them, so you can put them back.');
+  }
+  if (plan.some((p) => p.action === 'keep')) {
+    console.log('Where a .new file was saved, compare it with yours, keep what you want from it, then delete it.');
+  }
+  remindLeftovers();
+  // The dc command on your PATH is a separate copy; say if it's now older.
+  const installed = join(installPaths(['dc']).payload, 'dc.mjs');
+  const latest = template.files.find((f) => f.name === 'dc.mjs');
+  if (latest && existsSync(installed) && fingerprint(readFileSync(installed, 'utf8')) !== fingerprint(latest.text)) {
+    console.log(`Your dc command is older than this project's. To update it: ${IS_WIN ? '.\\.devcontainer\\dc install' : './.devcontainer/dc install'}`);
+  }
+  return 0;
+}
+
 // ── install / uninstall ─────────────────────────────────────────────────────
 
 // Windows gets BOTH shims. CMD cannot run a .ps1, and PowerShell going through
@@ -1461,6 +1661,7 @@ const HELP = `dc — dev containers without VS Code
   dc restore <name> [--quick]      put a snapshot back (--yes: don't ask)
   dc status                        show this project's containers
   dc logs [--follow]               container logs
+  dc update [template folder]      bring .devcontainer up to the latest template
   dc doctor                        check prerequisites
   dc install [name] [--link]       install to your PATH (as dc and dcp, or just [name])
   dc uninstall [name]              remove it (both names, or just [name])
@@ -1511,6 +1712,12 @@ async function main(argv) {
     if (flags.has('--rm')) { console.error('dc volumes: use --rm or --prune, not both.'); return 1; }
     // Works across projects, so it doesn't need to run inside one.
     return preflight() ? cmdPrune(flags) : 1;
+  }
+
+  if (cmd === 'update') {
+    const unknown = [...flags].filter((f) => f !== '--yes');
+    if (unknown.length) { console.error(`dc update: unknown option ${unknown.join(' ')}`); return 1; }
+    return cmdUpdate(requireRoot(), flags, rest);
   }
 
   const root = requireRoot();

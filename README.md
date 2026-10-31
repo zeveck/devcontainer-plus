@@ -16,6 +16,7 @@ It all runs locally, on your own hardware. The difference is that the agents and
 - [Reaching a server in the container](#reaching-a-server-in-the-container)
 - [Letting an agent use a browser](#letting-an-agent-use-a-browser)
 - [Changing how it's set up](#changing-how-its-set-up)
+- [Getting the latest version](#getting-the-latest-version)
 
 ## What's inside
 
@@ -107,6 +108,7 @@ dc forward     reach a port in the container    (see below)
 dc snapshot    save this moment to come back to (see below; dc restore goes back)
 dc status      show this project's container
 dc logs        show its output                  (--follow to keep watching)
+dc update      get the latest devcontainer-plus     (see below)
 dc doctor      check your setup
 ```
 
@@ -267,6 +269,18 @@ If your network blocks npmjs.org, point `NPM_REGISTRY` somewhere else in `devcon
 ```json
 "containerEnv": { "NPM_REGISTRY": "https://your-registry.example.com/api/npm/npm-repos/" }
 ```
+
+## Getting the latest version
+
+To bring a project's `.devcontainer` up to the latest devcontainer-plus, run this in the project folder on your computer:
+
+```bash
+dc update
+```
+
+It fetches the latest version from GitHub (or give it a local copy of this repo: `dc update C:\LocalDev\devcontainer-plus`), shows what it would change, and asks first. Files you haven't touched are updated; files you've changed keep your changes, with the new version's changes merged in. If you both changed the same lines, yours stays as it is and the new version is saved beside it as `<file>.new` to compare. Files that aren't part of devcontainer-plus are left alone. Then rebuild with `dc up --rebuild`.
+
+It keeps a small record of what it installed in `.devcontainer/.dcp.json`; commit it with the rest. The first time, before there's a record, it can't tell your changes from an older copy, so it replaces files that differ and says so: if the project is in git, `git diff .devcontainer` shows what changed, so you can put back anything of yours.
 
 ## Disclaimer
 
