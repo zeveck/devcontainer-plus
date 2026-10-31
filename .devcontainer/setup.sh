@@ -44,6 +44,38 @@ if settings["idleCompaction"] is False:
 PY
 fi
 
+# A status line for Claude Code: model | context used | 5-hour limit | 7-day
+# limit, each as a bar. Turned on only if your Claude settings don't already
+# have a status line. To leave it out, uncomment the next line and rebuild.
+# NO_STATUSLINE=1
+if [ -z "${NO_STATUSLINE:-}" ]; then
+  python3 - "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(dirname "$0")/statusline.sh" 2>/dev/null <<'PY' || echo "   (couldn't set up the status line)" >&2
+import hashlib, json, os, shutil, sys
+config, source = sys.argv[1], sys.argv[2]
+script = os.path.join(config, "statusline.sh")
+mark = os.path.join(config, ".statusline.sh.installed")
+digest = lambda p: hashlib.sha256(open(p, "rb").read()).hexdigest()
+os.makedirs(config, exist_ok=True)
+# Install, or refresh a copy we installed that hasn't been changed since.
+untouched = os.path.exists(mark) and os.path.exists(script) and open(mark).read().strip() == digest(script)
+if not os.path.exists(script) or untouched:
+    shutil.copyfile(source, script)
+    os.chmod(script, 0o755)
+    with open(mark, "w") as f: f.write(digest(script) + "\n")
+path = os.path.join(config, "settings.json")
+try:
+    with open(path) as f: settings = json.load(f)
+except FileNotFoundError:
+    settings = {}
+if "statusLine" not in settings and os.path.exists(mark):
+    settings["statusLine"] = {"type": "command", "command": "bash " + script}
+    with open(path + ".tmp", "w") as f: json.dump(settings, f, indent=2); f.write("\n")
+    os.replace(path + ".tmp", path)
+    print("   Status line on: model, context used, and your 5-hour and 7-day limits.")
+    print("   (To leave it out, see NO_STATUSLINE in .devcontainer/setup.sh.)")
+PY
+fi
+
 # ── npm registry (optional) ──────────────────────────────────────────────────
 if [ -n "${NPM_REGISTRY:-}" ]; then
   echo "Configuring npm registry: $NPM_REGISTRY"

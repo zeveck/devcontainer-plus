@@ -249,11 +249,14 @@ The whole configuration is a handful of files in `.devcontainer/`:
 
 - `devcontainer.json` sets the base image, VS Code extensions, and container options
 - `setup.sh` installs the agents, the browser, and the command-line tools
+- `statusline.sh` is the status line Claude Code shows under the prompt
 - `on-create.sh` runs first on each build: it fixes folder ownership and deletes saved agent logins
 - `auth` is the sign-in helper
 - `dc`, `dc.cmd`, `dc.ps1`, and `dc.mjs` make up the `dc` command
 
 To add or remove software, edit `setup.sh` and rebuild the container.
+
+Claude Code also gets a status line under the prompt: the model, how much of the conversation's context is used, and how much of your 5-hour and 7-day usage limits is gone, each as a bar that turns yellow and then red. It's only added if your Claude settings don't have a status line already. To leave it out, uncomment `NO_STATUSLINE=1` in `setup.sh` and rebuild.
 
 Claude Code normally compacts a long conversation while you're away from it, so you come back to a summary. The container turns that off, unless your Claude settings already say either way. To keep it on, uncomment `KEEP_IDLE_COMPACTION=1` in `setup.sh` and rebuild, or remove the `"idleCompaction": false` line from `~/.claude/settings.json` in the container.
 
