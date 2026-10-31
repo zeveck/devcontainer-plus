@@ -174,7 +174,9 @@ async function setup(t, { running = true } = {}) {
     if (!existsSync(d)) return null;
     const { readdirSync } = require_fs;
     const f = readdirSync(d).find((n) => /^relay-.*\.json$/.test(n));
-    return f ? JSON.parse(readFileSync(join(d, f), 'utf8')) : null;
+    // The relay can delete its file between the listing and the read: that
+    // just means it's gone.
+    try { return f ? JSON.parse(readFileSync(join(d, f), 'utf8')) : null; } catch { return null; }
   };
   t.after(async () => {
     // With DC_TEST_TRACE, show what the relay and the fake docker did.
