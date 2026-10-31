@@ -71,11 +71,15 @@ if "statusLine" not in settings and os.path.exists(mark):
     settings["statusLine"] = {"type": "command", "command": "bash " + script}
     with open(path + ".tmp", "w") as f: json.dump(settings, f, indent=2); f.write("\n")
     os.replace(path + ".tmp", path)
-# Say so on every build where it's ours, as idle compaction does.
+# Say what happened on every build, as idle compaction does.
 line = settings.get("statusLine")
 if isinstance(line, dict) and line.get("command") == "bash " + script:
     print("   Status line on: model, context used, and your 5-hour and 7-day limits.")
     print("   (To leave it out, see NO_STATUSLINE in .devcontainer/setup.sh.)")
+elif line:
+    print("   Keeping your own status line. (To try this one, remove yours from Claude's settings and rebuild.)")
+elif not os.path.exists(mark):
+    print(f"   No status line added: {script.replace(os.path.expanduser('~'), '~')} is your own, so it's left as it is.")
 PY
 fi
 
