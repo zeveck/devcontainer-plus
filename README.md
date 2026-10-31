@@ -131,7 +131,7 @@ auth --force    # replace a login you already have
 auth --logout   # sign out
 ```
 
-It sends you to the right page to create the token, then takes the token you paste back and signs you in.
+It sends you to the right page to create the token, then takes the token you paste back and signs you in. For GitHub it also lets plain `git` use the login, so `git push` works and agents can install plugins from your private repos. (`gh auth login` asks about this itself; say yes.)
 
 Either way, rebuilding a container signs you out, since logins aren't stored outside it. Sign in again and carry on. And `auth --logout` only affects the container you're in — the token stays valid, so anywhere else you've used it keeps working.
 
