@@ -109,6 +109,7 @@ dc volumes     saved agent history              (see below)
 dc forward     reach a port in the container    (see below)
 dc snapshot    save this moment to come back to (see below; dc restore goes back)
 dc status      show this project's container
+dc statusline  switch Claude's status line      (devcontainer-plus's or yours)
 dc logs        show its output                  (--follow to keep watching)
 dc init        add devcontainer-plus to this folder
 dc update      get the latest devcontainer-plus (see below)
@@ -256,14 +257,14 @@ The whole configuration is a handful of files in `.devcontainer/`:
 
 - `devcontainer.json` sets the base image, VS Code extensions, and container options
 - `setup.sh` installs the agents, the browser, and the command-line tools
-- `statusline.sh` is the status line Claude Code shows under the prompt
+- `statusline.sh` is the status line Claude Code shows under the prompt, and `statusline.py` sets it up and switches it
 - `on-create.sh` runs first on each build: it fixes folder ownership and deletes saved agent logins
 - `auth` is the sign-in helper
 - `dc`, `dc.cmd`, `dc.ps1`, and `dc.mjs` make up the `dc` command
 
 To add or remove software, edit `setup.sh` and rebuild the container.
 
-Claude Code also gets a status line under the prompt: the model, how much of the conversation's context is used, and how much of your 5-hour and 7-day usage limits is gone, each as a bar that turns yellow and then red. It's only added if your Claude settings don't have a status line already; one you've set up yourself is never replaced. To use this one instead, remove your `statusLine` setting from `~/.claude/settings.json` in the container and rebuild. To leave it out, uncomment `NO_STATUSLINE=1` in `setup.sh` and rebuild.
+Claude Code also gets a status line under the prompt: the model, how much of the conversation's context is used, and how much of your 5-hour and 7-day usage limits is gone, each as a bar that turns yellow and then red. It's only added if your Claude settings don't have a status line already; one you've set up yourself is never replaced, and the build shows a preview of this one instead. To switch, run `dc statusline` (or, in the container, `python3 .devcontainer/statusline.py switch`): it swaps to this one and keeps yours, and running it again swaps back. With no status line of your own, running it again turns it off, and it stays off when you rebuild. To leave it out of builds entirely, uncomment `NO_STATUSLINE=1` in `setup.sh`.
 
 Claude Code normally compacts a long conversation while you're away from it, so you come back to a summary. The container turns that off, unless your Claude settings already say either way. To keep it on, uncomment `KEEP_IDLE_COMPACTION=1` in `setup.sh` and rebuild, or remove the `"idleCompaction": false` line from `~/.claude/settings.json` in the container.
 

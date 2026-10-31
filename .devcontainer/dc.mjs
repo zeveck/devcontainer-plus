@@ -1695,6 +1695,7 @@ const HELP = `${NAME} — dev containers without VS Code
   ${NAME} snapshot --list | --rm <name> list snapshots, or delete one
   ${NAME} restore <name> [--quick]      put a snapshot back (--yes: don't ask)
   ${NAME} status                        show this project's containers
+  ${NAME} statusline                    switch Claude's status line: ours or yours
   ${NAME} logs [--follow]               container logs
   ${NAME} init [template folder]        add devcontainer-plus to this folder
   ${NAME} update [template folder]      bring .devcontainer up to the latest template
@@ -1834,6 +1835,19 @@ async function main(argv) {
       return cmdSnapshot(root, flags, rest);
     case 'restore':
       return cmdRestore(root, flags, rest);
+    case 'statusline': {
+      // Switch Claude Code's status line between devcontainer-plus's and yours,
+      // in the running container (statusline.py does the switching).
+      if (!existsSync(join(root, '.devcontainer', 'statusline.py'))) {
+        console.error(`${NAME} statusline: this project's dev container is older than that. Run ${NAME} update, then ${NAME} up --rebuild.`);
+        return 1;
+      }
+      if (!findContainers(root).some((c) => c.state === 'running')) {
+        console.error(`${NAME} statusline: the container isn't running. Start it with ${NAME} up, then try again.`);
+        return 1;
+      }
+      return dc(buildExecArgs(root, ['python3', '.devcontainer/statusline.py', 'switch'], { env: process.env }));
+    }
     case 'status': {
       const cs = findContainers(root);
       if (!cs.length) { reportNoMatch(root); return 0; }
