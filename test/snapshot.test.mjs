@@ -159,7 +159,7 @@ test('dc snapshot: names must be new, and --list and --rm manage them', (t) => {
   assert.equal(dc('snapshot', 'a').status, 0);
   const again = dc('snapshot', 'a');
   assert.equal(again.status, 1);
-  assert.match(again.stderr, /a already exists/);
+  assert.match(again.stderr, /a already exists\. Add --overwrite/);
   assert.match(dc('snapshot', '../escape').stderr, /give one name/);
   assert.match(dc('snapshot').stderr, /give one name/);
   assert.match(dc('snapshot', '--list').stdout, /^a\s+.+\s+\d+\.\d (MB|GB)$/m);
@@ -263,6 +263,29 @@ test('dc restore: a snapshot without this project\'s dev container setup is refu
   assert.equal(r.status, 1);
   assert.match(r.stderr, /no \.devcontainer\/devcontainer\.json in the project archive/);
   assert.equal(readFileSync(join(s.proj, 'notes.txt'), 'utf8'), 'changed');
+});
+
+test('dc snapshot --overwrite: replaces a snapshot, but only once the new one is complete', (t) => {
+  if (posixOnly(t)) return;
+  const s = setup(t, { running: false });
+  assert.equal(s.dc('snapshot', 'clean').status, 0);
+  writeFileSync(join(s.proj, 'notes.txt'), 'newer notes');
+  // A snapshot that fails partway (here: the container won't stop) keeps the old one.
+  const st = s.docker(); st.state = 'running'; st.failStop = true; writeFileSync(s.env.FAKE_STATE, JSON.stringify(st));
+  const [key] = readdirSync(join(s.env.DC_STATE_DIR, 'snapshots'));
+  const meta = () => readFileSync(join(s.env.DC_STATE_DIR, 'snapshots', key, 'clean', 'snapshot.json'), 'utf8');
+  const before = meta();
+  assert.equal(s.dc('snapshot', 'clean', '--overwrite', '--yes').status, 1);
+  assert.equal(meta(), before, 'the old snapshot is untouched');
+  st.failStop = false; st.state = 'exited'; writeFileSync(s.env.FAKE_STATE, JSON.stringify(st));
+  const r = s.dc('snapshot', 'clean', '--overwrite');
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /Replaced snapshot clean/);
+  writeFileSync(join(s.proj, 'notes.txt'), 'changed again');
+  assert.equal(s.dc('restore', 'clean', '--quick', '--yes').status, 0);
+  assert.equal(readFileSync(join(s.proj, 'notes.txt'), 'utf8'), 'newer notes');
+  assert.match(s.dc('snapshot', '--list').stdout, /^clean\s/m);
+  assert.doesNotMatch(s.dc('snapshot', '--list').stdout, /old|partial/);
 });
 
 test('dc restore: unknown names and options', (t) => {

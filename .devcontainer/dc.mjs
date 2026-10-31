@@ -966,7 +966,7 @@ const refill = (target, archive, exact) => {
 const toolOf = (volume) => volume.match(AGENT_VOLUME)?.[1];
 const humanSize = (bytes) => (bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.max(0.1, bytes / 1e6).toFixed(1)} MB`);
 const dirSize = (dir) => readdirSync(dir).reduce((sum, f) => sum + statSync(join(dir, f)).size, 0);
-const PARTIAL = /\.partial-(\d+)$/;
+const PARTIAL = /\.(?:partial|old)-(\d+)$/;
 
 function listSnapshots(root) {
   const dir = snapshotsDir(root);
@@ -1044,8 +1044,9 @@ async function cmdSnapshot(root, flags, rest) {
     console.log(`Deleted snapshot ${name}.`);
     return 0;
   }
-  if (existsSync(dir)) {
-    console.error(`dc snapshot: ${name} already exists. Pick another name, or delete it first with \`dc snapshot --rm ${name}\`.`);
+  const replacing = existsSync(dir);
+  if (replacing && !flags.has('--overwrite')) {
+    console.error(`dc snapshot: ${name} already exists. Add --overwrite to replace it, or pick another name.`);
     return 1;
   }
   if (refuseOverlap(root, 'snapshot')) return 1;
@@ -1118,7 +1119,15 @@ async function cmdSnapshot(root, flags, rest) {
         name, root, created: new Date().toISOString(), image,
         volumes: Object.fromEntries(volumes.map((v) => [toolOf(v), v])),
       });
-      renameSync(tmp, dir);
+      // Replace an old snapshot only now that the new one is complete.
+      if (replacing) {
+        const old = `${dir}.old-${process.pid}`;
+        renameSync(dir, old);
+        renameSync(tmp, dir);
+        rmSync(old, { recursive: true, force: true });
+      } else {
+        renameSync(tmp, dir);
+      }
     }
   } finally {
     if (!ok) rmSync(tmp, { recursive: true, force: true });
@@ -1128,7 +1137,7 @@ async function cmdSnapshot(root, flags, rest) {
   if (stopped.length) await resumeForwards(root);
   if (interrupted) { console.error('dc snapshot: stopped; nothing was saved.'); return 130; }
   if (!ok) return 1;
-  console.log(`Saved snapshot ${name}: the project folder${volumes.length ? ` and ${volumes.map(toolOf).join(', ')} data` : ''} (${humanSize(dirSize(dir))}).`);
+  console.log(`${replacing ? 'Replaced' : 'Saved'} snapshot ${name}: the project folder${volumes.length ? ` and ${volumes.map(toolOf).join(', ')} data` : ''} (${humanSize(dirSize(dir))}).`);
   console.log(`\`dc restore ${name}\` puts it all back.`);
   return 0;
 }
@@ -1403,7 +1412,7 @@ const HELP = `dc — dev containers without VS Code
   dc forward [<port>...]           forward ports to localhost, or list them
   dc forward <port>... --network   ...and to other devices on your network
   dc forward --rm <port>...        stop forwarding them
-  dc snapshot <name> [--yes]       save the project folder and agent data
+  dc snapshot <name> [--overwrite] save the project folder and agent data
   dc snapshot --list | --rm <name> list snapshots, or delete one
   dc restore <name> [--quick]      put a snapshot back (--yes: don't ask)
   dc status                        show this project's containers
@@ -1446,7 +1455,7 @@ async function main(argv) {
     }
   }
   if (cmd === 'snapshot' || cmd === 'restore') {
-    const allowed = cmd === 'snapshot' ? ['--list', '--rm', '--yes'] : ['--quick', '--yes'];
+    const allowed = cmd === 'snapshot' ? ['--list', '--rm', '--yes', '--overwrite'] : ['--quick', '--yes'];
     const unknown = [...flags].filter((f) => !allowed.includes(f));
     if (unknown.length) { console.error(`dc ${cmd}: unknown option ${unknown.join(' ')}`); return 1; }
   }

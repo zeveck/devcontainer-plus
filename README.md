@@ -183,6 +183,8 @@ dc snapshot --list         see your snapshots
 dc snapshot --rm clean     delete one
 ```
 
+To take a new snapshot under a name you've used before, add `--overwrite` (`dc snapshot clean --overwrite`). The old one is replaced only once the new one has saved completely, so a snapshot that fails partway leaves the old one as it was.
+
 If the container is running, `dc snapshot` stops it for a moment while it copies (so nothing is saved half-written) and starts it again after. If that would interrupt something, like a Claude session or a dev server, it tells you what and asks first; it's best to finish or exit what you're doing before taking a snapshot.
 
 You can keep as many as you like and hop between them: take `clean` before trying something, `try-1` after, and `dc restore clean` or `dc restore try-1` whenever you want.
