@@ -9,7 +9,7 @@
 // installed copy works in any project.
 
 import { spawn, spawnSync, execFile } from 'node:child_process';
-import { existsSync, mkdirSync, copyFileSync, writeFileSync, rmSync, chmodSync, readdirSync, readFileSync, renameSync, appendFileSync, linkSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, copyFileSync, writeFileSync, rmSync, chmodSync, readdirSync, readFileSync, renameSync, appendFileSync, linkSync, statSync, realpathSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { dirname, join, posix, resolve, win32 } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -1572,7 +1572,11 @@ async function main(argv) {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Node loads modules by their real path, but argv keeps the path as typed, so
+// compare real paths: a symlink anywhere above dc.mjs (macOS's /var -> /private/var)
+// would otherwise make dc silently do nothing.
+const realOrSelf = (p) => { try { return realpathSync(p); } catch { return p; } };
+if (process.argv[1] && fileURLToPath(import.meta.url) === realOrSelf(resolve(process.argv[1]))) {
   main(process.argv.slice(2)).then(
     (code) => process.exit(code),
     (err) => { console.error(`dc: ${err && err.message ? err.message : err}`); process.exit(1); },
