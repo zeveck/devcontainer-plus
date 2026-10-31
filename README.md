@@ -255,6 +255,8 @@ The whole configuration is a handful of files in `.devcontainer/`:
 
 To add or remove software, edit `setup.sh` and rebuild the container.
 
+Claude Code normally compacts a long conversation while you're away from it, so you come back to a summary. The container turns that off, unless your Claude settings already say either way. To keep it on, uncomment `KEEP_IDLE_COMPACTION=1` in `setup.sh` and rebuild, or turn it back on any time in Claude with `/config`.
+
 If your network blocks npmjs.org, point `NPM_REGISTRY` somewhere else in `devcontainer.json` and setup will use it for every install:
 
 ```json

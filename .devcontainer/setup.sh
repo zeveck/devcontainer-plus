@@ -20,6 +20,30 @@ quiet install_claude
 export PATH="$HOME/.local/bin:$PATH"
 echo "   $(claude --version)"
 
+# Claude Code compacts a long conversation while you're away from it, so you
+# can come back to a summary instead of the conversation you left. This turns
+# that off, unless your settings already say either way. To leave it on,
+# uncomment the next line and rebuild.
+# KEEP_IDLE_COMPACTION=1
+if [ -z "${KEEP_IDLE_COMPACTION:-}" ]; then
+  python3 - "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json" 2>/dev/null <<'PY' || echo "   (couldn't change Claude's settings; idle compaction stays on)" >&2
+import json, os, sys
+path = sys.argv[1]
+try:
+    with open(path) as f: settings = json.load(f)
+except FileNotFoundError:
+    settings = {}
+if "idleCompaction" not in settings:
+    settings["idleCompaction"] = False
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + ".tmp", "w") as f: json.dump(settings, f, indent=2); f.write("\n")
+    os.replace(path + ".tmp", path)
+if settings["idleCompaction"] is False:
+    print("   Idle compaction is off: Claude won't compact a conversation while you're away.")
+    print("   (To keep it on, see KEEP_IDLE_COMPACTION in .devcontainer/setup.sh.)")
+PY
+fi
+
 # ── npm registry (optional) ──────────────────────────────────────────────────
 if [ -n "${NPM_REGISTRY:-}" ]; then
   echo "Configuring npm registry: $NPM_REGISTRY"
