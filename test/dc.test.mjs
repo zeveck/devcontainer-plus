@@ -169,7 +169,7 @@ test('agentVolumesFromList: filters a docker volume ls listing', () => {
 const DC = fileURLToPath(new URL('../.devcontainer/dc.mjs', import.meta.url));
 const OTHER = '1'.repeat(52);
 
-function fakeDocker(t, { container = true } = {}) {
+function fakeDocker(t, { container = true, busy = false } = {}) {
   // realpath: on macOS tmpdir() is behind a symlink, and dc sees the real path.
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'dc-fake-')));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
@@ -187,6 +187,8 @@ function fakeDocker(t, { container = true } = {}) {
   const all = [`agent-claude-${id}`, `agent-codex-${id}`, `agent-gemini-${OTHER}`, 'postgres-data'];
   const dangling = container ? [`agent-gemini-${OTHER}`] : [`agent-claude-${id}`, `agent-codex-${id}`, `agent-gemini-${OTHER}`];
   writeFileSync(join(bin, 'docker'), `#!/bin/sh
+# What's running inside, for the check before stopping or replacing it.
+if [ "$1" = exec ]; then echo "docker exec" >> '${log}'; ${busy ? `printf 'claude claude\\n'` : 'true'}; exit 0; fi
 echo "docker $*" >> '${log}'
 case "$*" in
   "info") exit 0 ;;
@@ -209,7 +211,7 @@ exit 0
   });
   const raw = () => (existsSync(log) ? readFileSync(log, 'utf8') : '').split('\n').filter(Boolean);
   // The calls that change something; lookups are checked separately where they matter.
-  const calls = () => raw().filter((l) => !/^docker (info|ps|inspect|volume ls)/.test(l));
+  const calls = () => raw().filter((l) => !/^docker (info|ps|inspect|volume ls|exec$)/.test(l));
   return { runDc, calls, raw, proj, id };
 }
 
@@ -384,4 +386,20 @@ test('dc install: adds dc and dcp by default, and uninstall removes both', (t) =
 
   assert.equal(run('uninstall').status, 0);
   assert.ok(!existsSync(bin('dcp')) && !existsSync(payload));
+});
+
+test('commands that stop or replace a busy container ask one question, naming what runs, and touch nothing without an answer', (t) => {
+  if (posixOnly(t)) return;
+  for (const args of [['up', '--rebuild'], ['up', '--fresh'], ['down'], ['rm'], ['rm', '--volumes']]) {
+    const { runDc, calls } = fakeDocker(t, { busy: true });
+    const r = runDc(...args);
+    assert.equal(r.status, 1, args.join(' '));
+    assert.match(r.stderr, /^The container is running a Claude session\. /, args.join(' '));
+    assert.equal(r.stderr.split('?').length - 1, 1, `${args.join(' ')}: one question`);
+    assert.deepEqual(calls(), [], args.join(' '));
+  }
+  // --yes goes ahead.
+  const { runDc, calls } = fakeDocker(t, { busy: true });
+  assert.equal(runDc('down', '--yes').status, 0);
+  assert.ok(calls().some((l) => l.startsWith('docker stop')));
 });

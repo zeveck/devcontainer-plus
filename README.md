@@ -110,6 +110,8 @@ dc logs        show its output                  (--follow to keep watching)
 dc doctor      check your setup
 ```
 
+Before stopping or replacing a running container (`dc up --rebuild`, `dc up --fresh`, `dc down`, `dc rm`, `dc snapshot`), `dc` looks at what's running in it. If Claude, Codex, Gemini or anything else is busy, it says what and asks first; an idle container just goes. Add `--yes` to skip the question.
+
 When something won't start, run `dc doctor` first. It checks Docker, Node, and your project, and tells you which one is the problem.
 
 One thing to watch for on macOS and Linux: they already ship a small calculator program called `dc`, and this will hide it. If you use it, run `dcp uninstall dc` to give the calculator its name back and type `dcp` instead. To install under a name of your own, use `dc install <name>`. To remove everything, run `dc uninstall` (with the name, if you installed under one).

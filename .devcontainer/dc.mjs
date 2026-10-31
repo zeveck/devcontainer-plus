@@ -282,6 +282,7 @@ function projectVolumes(root, containers) {
 async function confirm(question, flags) {
   if (flags.has('--yes')) return true;
   if (!process.stdin.isTTY) {
+    console.error(question);
     console.error('dc: not going ahead without confirmation; rerun with --yes.');
     return false;
   }
@@ -367,11 +368,14 @@ async function cmdRmVolumes(root, flags) {
   const cs = findContainers(root);
   const volumes = projectVolumes(root, cs);
   if (!cs.length && !volumes.length) { reportNoMatch(root); return 0; }
+  const note = busyNote(whatsRunning(cs), (s) => `Removing ${s}`);
   if (volumes.length) {
     const q = cs.length
       ? 'Remove this project\'s container and its agent history (sessions, memory, settings, plugins)?'
       : 'Delete this project\'s saved agent history (sessions, memory, settings, plugins)?';
-    if (!(await confirm(q, flags))) return 1;
+    if (!(await confirm(`${note ? `${note} ` : ''}${q}`, flags))) return 1;
+  } else if (note && !(await confirm(`${note} Go ahead?`, flags))) {
+    return 1;
   }
   const status = removeContainersAndVolumes(cs, volumes);
   if (status === 0 && volumes.length) console.log('Deleted. The next `dc up` starts with empty agent folders.');
@@ -1024,6 +1028,40 @@ export function describeActivity(lines) {
   return shown.length === 1 ? shown[0] : `${shown.slice(0, -1).join(', ')} and ${shown.at(-1)}`;
 }
 
+/**
+ * What's running in this project's running containers, before a command stops
+ * or replaces them: "" when they're idle or stopped, a description such as "a
+ * Claude session" when something is, or null when it couldn't look (a frozen
+ * container gets 10 seconds).
+ */
+function whatsRunning(cs) {
+  let lines = [];
+  for (const c of cs.filter((x) => x.state === 'running')) {
+    const r = spawnSmart('docker', ['exec', c.id, 'sh', '-c', PROCESS_LIST], { encoding: 'utf8', timeout: 10000 });
+    if (r.status !== 0) return null;
+    lines = lines.concat(r.stdout.split('\n').filter(Boolean));
+  }
+  return describeActivity(lines);
+}
+
+/**
+ * The sentence that goes before the question when a command would interrupt
+ * something, or "" when it wouldn't. `doing(subject)` names the action, such as
+ * (s) => `Rebuilding ${s}`. When it couldn't look, it says so rather than
+ * assume the container is idle.
+ */
+function busyNote(what, doing) {
+  if (what === '') return '';
+  if (what === null) return `${doing('the container')} interrupts anything running in it.`;
+  return `The container is running ${what}. ${doing('it')} interrupts that.`;
+}
+
+/** Ask only when something would be interrupted. */
+async function okToInterrupt(cs, doing, flags) {
+  const note = busyNote(whatsRunning(cs), doing);
+  return !note || confirm(`${note} Go ahead?`, flags);
+}
+
 async function cmdSnapshot(root, flags, rest) {
   if (flags.has('--list')) {
     const snaps = listSnapshots(root);
@@ -1064,22 +1102,14 @@ async function cmdSnapshot(root, flags, rest) {
   // interrupt something, say what and ask first; if it's idle, just go.
   const running = cs.filter((x) => x.state === 'running');
   if (running.length) {
-    let lines = [];
-    let looked = true;
-    for (const c of running) {
-      const r = capture('docker', ['exec', c.id, 'sh', '-c', PROCESS_LIST]);
-      if (r.status !== 0) { looked = false; break; }
-      lines = lines.concat(r.stdout.split('\n').filter(Boolean));
-    }
-    const what = looked ? describeActivity(lines) : '';
-    if (!looked || what) {
+    const what = whatsRunning(cs);
+    if (what === '') console.log('Pausing the container while it copies...');
+    else {
       // Couldn't look inside? Ask anyway rather than assume it's idle.
-      const q = looked
+      const q = what
         ? `The container is running ${what}. Snapshotting stops it for a moment, which interrupts that. Go ahead?`
         : 'Snapshotting stops the container for a moment, which interrupts anything running in it. Go ahead?';
       if (!(await confirm(q, flags))) return 1;
-    } else {
-      console.log('Pausing the container while it copies...');
     }
   }
   const volumes = projectVolumes(root, cs);
@@ -1155,11 +1185,13 @@ async function cmdRestore(root, flags, rest) {
   if (refuseOverlap(root, 'restore')) return 1;
   const tools = Object.keys(meta.volumes || {}).filter((t) => AGENT_TOOLS.includes(t));
 
-  const q = `Restore ${name} (${new Date(meta.created).toLocaleString()})? This replaces everything in ${root}, including its git history,`
+  const cs = findContainers(root);
+  const note = busyNote(whatsRunning(cs), (s) => `Restoring ${flags.has('--quick') ? 'stops' : 'replaces'} ${s}, which`);
+  const q = `${note ? `${note} ` : ''}`
+    + `Restore ${name} (${new Date(meta.created).toLocaleString()})? This replaces everything in ${root}, including its git history,`
     + `${tools.length ? ' and this project\'s Claude, Codex, and Gemini data' : ''} with the snapshot.`;
   if (!(await confirm(q, flags))) return 1;
 
-  const cs = findContainers(root);
   const image = helperImage(cs, meta.image);
   if (!image) return 1;
   const snapMount = mountArg('bind', dir, '/snap', true);
@@ -1418,7 +1450,7 @@ const HELP = `dc — dev containers without VS Code
   dc shell                         interactive shell inside it
   dc exec <cmd> [args...]          run a command inside it
   dc claude|codex|gemini|pw [...]  run an agent inside it
-  dc down                          stop the container
+  dc down [--yes]                  stop the container
   dc rm [--volumes] [--yes]        stop and remove it (--volumes: delete agent data too)
   dc volumes [--rm | --prune]      list or delete saved agent data (--yes: don't ask)
   dc forward [<port>...]           forward ports to localhost, or list them
@@ -1488,12 +1520,18 @@ async function main(argv) {
   switch (cmd) {
     case 'up': {
       const a = ['up', '--workspace-folder', root];
+      if (flags.has('--rebuild') && !flags.has('--fresh')) {
+        if (!(await okToInterrupt(findContainers(root), (s) => `Rebuilding ${s}`, flags))) return 1;
+      }
       if (flags.has('--fresh')) {
         const cs = findContainers(root);
         const volumes = projectVolumes(root, cs);
+        const note = busyNote(whatsRunning(cs), (s) => `Starting ${s} fresh`);
         if (volumes.length) {
-          const q = 'Start fresh? Claude, Codex, and Gemini will forget this project\'s sessions, memory, settings, and plugins.';
+          const q = `${note ? `${note} ` : ''}Start fresh? Claude, Codex, and Gemini will forget this project's sessions, memory, settings, and plugins.`;
           if (!(await confirm(q, flags))) return 1;
+        } else if (note && !(await confirm(`${note} Go ahead?`, flags))) {
+          return 1;
         } else {
           console.log('Nothing saved yet; rebuilding.');
         }
@@ -1527,6 +1565,7 @@ async function main(argv) {
     case 'down': {
       const cs = findContainers(root);
       if (!cs.length) { reportNoMatch(root); return 0; }
+      if (!(await okToInterrupt(cs, (s) => `${cmd === 'rm' ? 'Removing' : 'Stopping'} ${s}`, flags))) return 1;
       const volumes = cmd === 'rm' ? projectVolumes(root, cs) : [];
       for (const c of cs) {
         runQuiet('docker', cmd === 'rm' ? ['rm', '-f', c.id] : ['stop', c.id]);
