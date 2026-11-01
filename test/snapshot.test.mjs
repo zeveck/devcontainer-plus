@@ -432,3 +432,15 @@ test('dc snapshot: a stopped container needs no question', (t) => {
   assert.equal(r.status, 0, r.stderr);
   assert.ok(!s.calls().includes('stop c1'));
 });
+
+test('restore hands files back to the recorded owner where it unpacks as root without owners', async () => {
+  const { refill } = await import('../.devcontainer/dc.mjs');
+  // Docker Desktop shares (Windows, macOS): no exact owners, so the helper's
+  // root would own everything and the project would be read-only to the
+  // container's user. The archive's own owner for the folder is put back.
+  const shared = refill('/proj', 'project.tgz', false);
+  assert.match(shared, /tar --numeric-owner -tvzf \/snap\/project\.tgz/);
+  assert.match(shared, /chown -R "\$o" \/proj 2>\/dev\/null \|\| chmod -R a\+rwX \/proj/);
+  // Linux keeps exact owners already, and the agent volumes too.
+  assert.doesNotMatch(refill('/proj', 'project.tgz', true), /chown -R/);
+});

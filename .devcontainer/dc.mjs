@@ -956,18 +956,23 @@ const save = (from, file) => `${TAR_N} umask 077 && tar $N --exclude=./${STAGING
  * nothing touched), then clear everything else, keeping on past anything that
  * can't be removed, then copy the snapshot in over whatever remains. Anything
  * left that the snapshot doesn't have is listed as "left: <name>"; exit 4.
- * `exact` keeps owners and permissions (Linux file systems); without it, files
- * get the folder's usual owner (Docker Desktop's shared folders refuse chown).
+ * `exact` keeps owners and permissions (Linux file systems). Without it (Docker
+ * Desktop's shared folders on Windows and macOS) the helper's root would own
+ * every file, leaving the project read-only to the container's user, so the
+ * files are handed to the owner the archive recorded for the folder itself;
+ * where a share refuses that, they're made writable instead.
  */
-const refill = (target, archive, exact) => {
+export const refill = (target, archive, exact) => {
   const own = exact ? '$N -p' : '--no-same-owner --no-same-permissions';
   const S = `${target}/${STAGING}`;
+  const handBack = exact ? '' : `o=$(tar --numeric-owner -tvzf /snap/${archive} 2>/dev/null | awk 'NR==1{print $2}' | tr / :); `
+    + `case "$o" in *[0-9]:*[0-9]) chown -R "$o" ${target} 2>/dev/null || chmod -R a+rwX ${target} 2>/dev/null;; esac; `;
   return `${TAR_N} rm -rf ${S} && mkdir ${S} && tar ${own} -C ${S} -xzf /snap/${archive} `
     + `|| { rm -rf ${S}; echo "couldn't unpack ${archive}" >&2; exit 3; }; `
     + `find ${target} -mindepth 1 -maxdepth 1 ! -name ${STAGING} -exec rm -rf {} + 2>/dev/null; `
     + `ls -A ${S} > /tmp/want; (cd ${S} && tar cf - .) | (cd ${target} && tar ${own} -xf -) `
     + `|| { echo "couldn't copy the snapshot in" >&2; rm -rf ${S}; exit 5; }; `
-    + `rm -rf ${S}; extra=$(ls -A ${target} | grep -v -x -F -f /tmp/want); `
+    + `rm -rf ${S}; ${handBack}extra=$(ls -A ${target} | grep -v -x -F -f /tmp/want); `
     + `[ -z "$extra" ] || { printf '%s\\n' "$extra" | sed 's/^/left: /' >&2; exit 4; }`;
 };
 
