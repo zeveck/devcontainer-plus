@@ -92,7 +92,7 @@ def preview():
 def show(settings):
     which = in_use(settings)
     if which == "ours":
-        print("   Status line on: model, context used, and your 5-hour and 7-day limits.")
+        print("   Status line on: model, context used, and your usage limits.")
     elif which == "yours":
         print("   Keeping your own status line. devcontainer-plus's looks like this:")
         sample = preview()

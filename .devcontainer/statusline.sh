@@ -1,5 +1,6 @@
 #!/bin/bash
-# devcontainer-plus status line: model | context | 5-hour limit | 7-day limit.
+# devcontainer-plus status line: model | context | 5-hour limit | 7-day limit
+# (each limit only when your plan has it).
 # Setup copies this to ~/.claude/statusline.sh on each build, unless that copy
 # has been changed since (setup keeps a fingerprint of what it installed).
 export LC_ALL=C
@@ -39,8 +40,9 @@ bar() {
   printf '%s \033[%sm%s\033[2m%s\033[0m %d%%' "$label" "$color" "$full" "$empty" "$n"
 }
 
-printf '%s | %s | %s | %s\n' \
-  "${model:-Claude}" \
-  "$(bar ctx "$ctx")" \
-  "$(bar 5h "$five")" \
-  "$(bar 7d "$week")"
+# A limit shows only while Claude Code reports it: plans without a 5-hour
+# window (and API keys, which have no plan limits) leave it out.
+line="${model:-Claude} | $(bar ctx "$ctx")"
+[ -n "$five" ] && line+=" | $(bar 5h "$five")"
+[ -n "$week" ] && line+=" | $(bar 7d "$week")"
+printf '%s\n' "$line"
