@@ -400,7 +400,7 @@ sys.stdout.write(out.decode(errors='replace'))
 `;
   const r = spawnSync('python3', ['-c', py, process.execPath, DC, 'snapshot', 'clean'], { cwd: s.proj, env: s.env, encoding: 'utf8' });
   if (r.error) return t.skip('no python3 here');
-  assert.match(r.stdout, /The container is running a Claude session and python3\. Snapshotting stops it for a moment, which interrupts that\./);
+  assert.match(r.stdout, /The container is running a Claude session and python3\.\r?\nSnapshotting stops it for a moment, which interrupts that\.\r?\nGo ahead\?/);
   assert.equal(s.docker().state, 'running');
   assert.deepEqual(s.calls(), []);
 });

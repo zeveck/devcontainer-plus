@@ -377,8 +377,8 @@ async function cmdRmVolumes(root, flags) {
     const q = cs.length
       ? 'Remove this project\'s container and its agent history (sessions, memory, settings, plugins)?'
       : 'Delete this project\'s saved agent history (sessions, memory, settings, plugins)?';
-    if (!(await confirm(`${note ? `${note} ` : ''}${q}`, flags))) return 1;
-  } else if (note && !(await confirm(`${note} Go ahead?`, flags))) {
+    if (!(await confirm(`${note ? `${note}\n` : ''}${q}`, flags))) return 1;
+  } else if (note && !(await confirm(`${note}\nGo ahead?`, flags))) {
     return 1;
   }
   const status = removeContainersAndVolumes(cs, volumes);
@@ -1059,21 +1059,22 @@ function whatsRunning(cs) {
 }
 
 /**
- * The sentence that goes before the question when a command would interrupt
- * something, or "" when it wouldn't. `doing(subject)` names the action, such as
+ * The lines that go before the question when a command would interrupt
+ * something, or "" when it wouldn't (each sentence on its own line, so a long
+ * list of what's running doesn't make one long line). `doing(subject)` names the action, such as
  * (s) => `Rebuilding ${s}`. When it couldn't look, it says so rather than
  * assume the container is idle.
  */
 function busyNote(what, doing) {
   if (what === '') return '';
   if (what === null) return `${doing('the container')} interrupts anything running in it.`;
-  return `The container is running ${what}. ${doing('it')} interrupts that.`;
+  return `The container is running ${what}.\n${doing('it')} interrupts that.`;
 }
 
 /** Ask only when something would be interrupted. */
 async function okToInterrupt(cs, doing, flags) {
   const note = busyNote(whatsRunning(cs), doing);
-  return !note || confirm(`${note} Go ahead?`, flags);
+  return !note || confirm(`${note}\nGo ahead?`, flags);
 }
 
 async function cmdSnapshot(root, flags, rest) {
@@ -1121,8 +1122,8 @@ async function cmdSnapshot(root, flags, rest) {
     else {
       // Couldn't look inside? Ask anyway rather than assume it's idle.
       const q = what
-        ? `The container is running ${what}. Snapshotting stops it for a moment, which interrupts that. Go ahead?`
-        : 'Snapshotting stops the container for a moment, which interrupts anything running in it. Go ahead?';
+        ? `The container is running ${what}.\nSnapshotting stops it for a moment, which interrupts that.\nGo ahead?`
+        : 'Snapshotting stops the container for a moment, which interrupts anything running in it.\nGo ahead?';
       if (!(await confirm(q, flags))) return 1;
     }
   }
@@ -1796,9 +1797,9 @@ async function main(argv) {
         const volumes = projectVolumes(root, cs);
         const note = busyNote(whatsRunning(cs), (s) => `Starting ${s} fresh`);
         if (volumes.length) {
-          const q = `${note ? `${note} ` : ''}Start fresh? Claude, Codex, and Gemini will forget this project's sessions, memory, settings, and plugins.`;
+          const q = `${note ? `${note}\n` : ''}Claude, Codex, and Gemini will forget this project's sessions, memory, settings, and plugins.\nStart fresh?`;
           if (!(await confirm(q, flags))) return 1;
-        } else if (note && !(await confirm(`${note} Go ahead?`, flags))) {
+        } else if (note && !(await confirm(`${note}\nGo ahead?`, flags))) {
           return 1;
         } else {
           console.log('Nothing saved yet; rebuilding.');

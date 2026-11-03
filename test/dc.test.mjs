@@ -397,7 +397,7 @@ test('commands that stop or replace a busy container ask one question, naming wh
     const { runDc, calls } = fakeDocker(t, { busy: true });
     const r = runDc(...args);
     assert.equal(r.status, 1, args.join(' '));
-    assert.match(r.stderr, /^The container is running a Claude session\. /, args.join(' '));
+    assert.match(r.stderr, /^The container is running a Claude session\.\n/, args.join(' '));
     assert.equal(r.stderr.split('?').length - 1, 1, `${args.join(' ')}: one question`);
     assert.deepEqual(calls(), [], args.join(' '));
   }
