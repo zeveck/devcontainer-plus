@@ -129,9 +129,12 @@ fs.writeFileSync(${JSON.stringify(log)}, JSON.stringify({ args: a, config: i >= 
   assert.match(dc('snapshot', '--list').stdout, /^keep\s.*\+ container \d/m);
 
   writeFileSync(join(proj, 'notes.txt'), 'changed');
+  // Asked without --yes (and no one to answer): the question says the container comes back too.
+  const ask = dc('restore', 'keep');
+  assert.equal(ask.status, 1);
+  assert.match(ask.stderr, /the container, with everything that was installed in it/);
   const restore = dc('restore', 'keep', '--yes');
   assert.equal(restore.status, 0, restore.stderr + restore.stdout);
-  assert.match(restore.stdout, /the container, with everything that was installed in it/);
   assert.match(restore.stdout, /Starting the saved container/);
   assert.equal(readFileSync(join(proj, 'notes.txt'), 'utf8'), 'original');
   const up = JSON.parse(readFileSync(log, 'utf8'));
