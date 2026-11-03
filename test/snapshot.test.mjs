@@ -448,3 +448,22 @@ test('restore hands files back to the recorded owner where it unpacks as root wi
   // Linux keeps exact owners already, and the agent volumes too.
   assert.doesNotMatch(refill('/proj', 'project.tgz', true), /chown -R/);
 });
+
+test('parseJsonc reads devcontainer.json: comments, trailing commas, // inside strings', async () => {
+  const { parseJsonc } = await import('../.devcontainer/dc.mjs');
+  assert.deepEqual(parseJsonc('{ // a comment\n "a": "http://x // y", /* block */ "b": [1, 2, ], "c": {"d": 1,}, }'),
+    { a: 'http://x // y', b: [1, 2], c: { d: 1 } });
+  assert.deepEqual(parseJsonc('{"q": "say \\"hi\\" // not a comment"}'), { q: 'say "hi" // not a comment' });
+});
+
+test('a full restore starts from the project config with the saved image instead of a build', async () => {
+  const { fullRestoreConfig, snapshotImage } = await import('../.devcontainer/dc.mjs');
+  const text = readFileSync(new URL('../.devcontainer/devcontainer.json', import.meta.url), 'utf8');
+  const c = fullRestoreConfig(text, 'dcp-snapshot-x:clean');
+  assert.equal(c.image, 'dcp-snapshot-x:clean');
+  assert.equal(c.features, undefined, 'features are already in the saved container');
+  assert.equal(c.mounts.length, 3, 'agent volumes still mounted');
+  assert.equal(c.remoteUser, 'vscode');
+  assert.deepEqual(Object.keys(fullRestoreConfig('{"build": {"dockerfile": "Dockerfile"}, "name": "x"}', 'i')), ['name', 'image']);
+  assert.match(snapshotImage('/some/proj', 'clean'), /^dcp-snapshot-[0-9a-f]{20}:clean$/);
+});

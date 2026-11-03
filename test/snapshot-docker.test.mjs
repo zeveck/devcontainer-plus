@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, realpathSync, statSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { devcontainerId, idLabelsFor } from '../.devcontainer/dc.mjs';
+import { devcontainerId, idLabelsFor, snapshotImage } from '../.devcontainer/dc.mjs';
 
 const DC = resolve(fileURLToPath(import.meta.url), '../../.devcontainer/dc.mjs');
 const enabled = process.env.DC_DOCKER_E2E === '1';
@@ -87,4 +87,66 @@ test('dc snapshot and restore with real Docker', { skip: !enabled && 'set DC_DOC
   assert.notEqual(docker('inspect', cid).status, 0, 'the old container is gone');
   cid = '';
   assertRestored();
+});
+
+test('dc snapshot --full saves the container, and restore starts from it with setup skipped', { skip: !enabled && 'set DC_DOCKER_E2E=1 to run against real Docker', timeout: 300000 }, (t) => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'dc-full-')));
+  const proj = join(dir, 'proj');
+  mkdirSync(join(proj, '.devcontainer'), { recursive: true });
+  writeFileSync(join(proj, '.devcontainer', 'devcontainer.json'), '{\n  // a comment\n  "features": {"x": {}},\n  "remoteUser": "root",\n}\n');
+  writeFileSync(join(proj, 'notes.txt'), 'original');
+  const vol = `agent-claude-${devcontainerId(idLabelsFor(proj))}`;
+  // Stands in for `devcontainer up`: records how it was called and the config it was given.
+  const log = join(dir, 'up.json');
+  writeFileSync(join(dir, 'devcontainer.mjs'), `import fs from 'node:fs';
+const a = process.argv.slice(2), i = a.indexOf('--override-config');
+fs.writeFileSync(${JSON.stringify(log)}, JSON.stringify({ args: a, config: i >= 0 ? JSON.parse(fs.readFileSync(a[i + 1], 'utf8')) : null }));`);
+  const env = { ...process.env, DC_STATE_DIR: join(dir, 'state'), DC_FAKE_DEVCONTAINER: join(dir, 'devcontainer.mjs') };
+  const dc = (...args) => spawnSync(process.execPath, [DC, ...args], { cwd: proj, env, encoding: 'utf8', input: '' });
+  const image = snapshotImage(proj, 'keep');
+  let cid = '';
+  t.after(() => {
+    for (const c of docker('ps', '-aq', '--filter', `label=devcontainer.local_folder=${proj}`).stdout.split('\n').filter(Boolean)) docker('rm', '-f', c);
+    docker('rmi', '-f', image);
+    docker('volume', 'rm', '-f', vol);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  assert.equal(docker('pull', '-q', IMAGE).status, 0);
+  assert.equal(docker('volume', 'create', vol).status, 0);
+  // Nothing to save yet: --full needs a container.
+  assert.match(dc('snapshot', 'keep', '--full').stderr, /there isn't one yet/);
+  cid = docker('run', '-d', '--label', `devcontainer.local_folder=${proj}`,
+    '--mount', `type=volume,source=${vol},target=/data`, IMAGE, 'sleep', 'infinity').stdout.trim();
+  assert.ok(cid, 'container started');
+  // Something installed in the container, which only --full keeps.
+  assert.equal(docker('exec', cid, 'sh', '-c', 'echo v1 > /opt/installed-tool').status, 0);
+
+  const snap = dc('snapshot', 'keep', '--full');
+  assert.equal(snap.status, 0, snap.stderr + snap.stdout);
+  assert.match(snap.stdout, /and the container \(.*\+ container/);
+  assert.equal(docker('run', '--rm', image, 'cat', '/opt/installed-tool').stdout.trim(), 'v1', 'the saved image has what was installed');
+  assert.match(dc('snapshot', '--list').stdout, /^keep\s.*\+ container \d/m);
+
+  writeFileSync(join(proj, 'notes.txt'), 'changed');
+  const restore = dc('restore', 'keep', '--yes');
+  assert.equal(restore.status, 0, restore.stderr + restore.stdout);
+  assert.match(restore.stdout, /the container, with everything that was installed in it/);
+  assert.match(restore.stdout, /Starting the saved container/);
+  assert.equal(readFileSync(join(proj, 'notes.txt'), 'utf8'), 'original');
+  const up = JSON.parse(readFileSync(log, 'utf8'));
+  assert.ok(up.args.includes('--skip-post-create'), up.args.join(' '));
+  assert.equal(up.config.image, image);
+  assert.equal(up.config.features, undefined);
+  assert.equal(up.config.remoteUser, 'root');
+  cid = '';
+
+  // --quick keeps whatever container there is; it doesn't use the saved one.
+  rmSync(log, { force: true });
+  assert.equal(dc('restore', 'keep', '--quick', '--yes').status, 0);
+  assert.ok(!existsSync(log), '--quick starts no container');
+
+  // Deleting the snapshot deletes its container too.
+  assert.equal(dc('snapshot', '--rm', 'keep').status, 0);
+  assert.notEqual(docker('image', 'inspect', image).status, 0, 'saved container deleted');
 });

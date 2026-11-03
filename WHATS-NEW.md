@@ -9,6 +9,7 @@ under the date it's released.
 ## 2026-11-03
 
 - **Restoring a snapshot really works on Windows now.** The Nov 1 fix still left restored files read-only inside the container; they're yours again, and existing snapshots work as they are.
+- **Full snapshots bring back the container as it was.** `dcp snapshot <name> --full` saves the container too, so restoring it has the same tools and versions, still signed in, with nothing to reinstall.
 - **`dcp update` keeps the `dcp` command current too.** No more running `dc install` again after an update, and `dcp version` shows which version you have.
 
 ## 2026-11-01

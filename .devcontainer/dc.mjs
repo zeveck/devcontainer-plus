@@ -878,8 +878,13 @@ async function relayMain(root) {
 // `dc snapshot <name>` saves this project's agent volumes (~/.claude, ~/.codex,
 // ~/.gemini) and the project folder; `dc restore <name>` puts them back exactly
 // and starts a brand-new container from the cached image, which drops anything
-// the work left inside the old container. The image is never saved: work never
-// changes it.
+// the work left inside the old container. Setup then installs the tools again,
+// at their latest versions.
+//
+// `dc snapshot <name> --full` also saves the container itself, as an image
+// (`docker commit`: what's installed in it, not the folder or volumes, which
+// are saved as above). Restoring a full snapshot starts a container from that
+// image with setup skipped, so the tools come back as they were.
 //
 // The copying runs in a throwaway container (`docker run --rm`) from the
 // project's own image, so it's the same on every OS and needs nothing on the
@@ -887,6 +892,46 @@ async function relayMain(root) {
 // they hold logins and .env files.
 
 export const SNAPSHOT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$/;
+// Where a full snapshot keeps its container (a snapshot name is a valid tag).
+export const snapshotImage = (root, name) => `dcp-snapshot-${projectKey(root)}:${name}`;
+
+/** devcontainer.json allows comments and trailing commas; JSON.parse doesn't. */
+export function parseJsonc(text) {
+  let out = '';
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '"') {
+      let j = i + 1;
+      while (j < text.length && text[j] !== '"') j += text[j] === '\\' ? 2 : 1;
+      out += text.slice(i, j + 1);
+      i = j;
+    } else if (c === '/' && text[i + 1] === '/') {
+      while (i < text.length && text[i] !== '\n') i++;
+      out += '\n';
+    } else if (c === '/' && text[i + 1] === '*') {
+      i = text.indexOf('*/', i + 2);
+      if (i < 0) break;
+      i++;
+    } else if (c === ',' && /^\s*[}\]]/.test(text.slice(i + 1).replace(/^\s*(\/\/[^\n]*\n|\/\*[\s\S]*?\*\/)*/g, ''))) {
+      // A trailing comma (possibly before comments): dropped.
+    } else {
+      out += c;
+    }
+  }
+  return JSON.parse(out);
+}
+
+/**
+ * The config a full restore starts from: the project's own, with the saved
+ * container's image in place of whatever built the original (the features are
+ * already in it).
+ */
+export function fullRestoreConfig(text, image) {
+  const config = parseJsonc(text);
+  for (const k of ['build', 'dockerFile', 'dockerfile', 'context', 'features']) delete config[k];
+  config.image = image;
+  return config;
+}
 const FALLBACK_HELPER_IMAGE = 'debian:stable-slim';
 const STAGING = '.dc-restore-staging';
 
@@ -1080,11 +1125,21 @@ async function okToInterrupt(cs, doing, flags) {
   return !note || confirm(`${note}\nGo ahead?`, flags);
 }
 
+/** How much a full snapshot's container adds (its own layer), or null if it's gone. */
+function savedContainerSize(image) {
+  const r = capture('docker', ['history', '-H=false', '--format', '{{.Size}}', image]);
+  const bytes = Number(r.status === 0 ? r.stdout.split('\n')[0] : NaN);
+  return Number.isFinite(bytes) ? humanSize(bytes) : null;
+}
+
 async function cmdSnapshot(root, flags, rest) {
   if (flags.has('--list')) {
     const snaps = listSnapshots(root);
     if (!snaps.length) { console.log(`No snapshots yet. \`${NAME} snapshot <name>\` makes one.`); return 0; }
-    for (const s of snaps) console.log(`${s.name.padEnd(20)}  ${new Date(s.created).toLocaleString()}  ${humanSize(s.bytes)}`);
+    for (const s of snaps) {
+      const container = s.full ? `  + container ${savedContainerSize(s.full.image) ?? '(missing)'}` : '';
+      console.log(`${s.name.padEnd(20)}  ${new Date(s.created).toLocaleString()}  ${humanSize(s.bytes)}${container}`);
+    }
     return 0;
   }
   const name = rest[0];
@@ -1096,7 +1151,9 @@ async function cmdSnapshot(root, flags, rest) {
   const dir = join(base, name);
   if (flags.has('--rm')) {
     if (!existsSync(dir)) { console.error(`${NAME} snapshot: no snapshot named ${name}.`); return 1; }
+    const old = readJson(join(dir, 'snapshot.json'));
     rmSync(dir, { recursive: true, force: true });
+    if (old?.full) runQuiet('docker', ['rmi', old.full.image]);
     console.log(`Deleted snapshot ${name}.`);
     return 0;
   }
@@ -1116,6 +1173,19 @@ async function cmdSnapshot(root, flags, rest) {
   }
 
   const cs = findContainers(root);
+  const full = flags.has('--full');
+  if (full && !cs.length) {
+    console.error(`${NAME} snapshot: --full saves the container too, and there isn't one yet. Run \`${NAME} up\` first, or leave off --full.`);
+    return 1;
+  }
+  if (full) {
+    let config = null;
+    try { config = parseJsonc(readFileSync(join(root, '.devcontainer', 'devcontainer.json'), 'utf8')); } catch { /* reported below */ }
+    if (!config || config.dockerComposeFile) {
+      console.error(`${NAME} snapshot: --full ${config ? 'doesn\'t work with Docker Compose setups' : 'couldn\'t read .devcontainer/devcontainer.json'}. Leave off --full to save the folder and agent data.`);
+      return 1;
+    }
+  }
   // Snapshotting stops a running container for a moment. If that would
   // interrupt something, say what and ask first; if it's idle, just go.
   const running = cs.filter((x) => x.state === 'running');
@@ -1141,6 +1211,8 @@ async function cmdSnapshot(root, flags, rest) {
   process.on('SIGINT', onInt);
   const stopped = [];
   const tmp = `${dir}.partial-${process.pid}`;
+  const finalImage = snapshotImage(root, name);
+  const partialImage = `${finalImage}.partial-${process.pid}`;
   let ok = true;
   try {
     // Stop the container so nothing is half-written while it's copied.
@@ -1162,12 +1234,21 @@ async function cmdSnapshot(root, flags, rest) {
       const r = helper(image, [mountArg('bind', root, '/proj', true), snapMount], save('/proj', 'project.tgz'));
       if (r.status !== 0 || interrupted) { ok = false; if (!interrupted) console.error(`${NAME} snapshot: couldn't save the project folder:\n${(r.stderr || '').trim()}`); }
     }
+    // --full: the container itself, while it's stopped, under a temporary tag.
+    if (ok && full) {
+      const r = capture('docker', ['commit', (running[0] || cs[0]).id, partialImage]);
+      if (r.status !== 0 || interrupted) { ok = false; if (!interrupted) console.error(`${NAME} snapshot: couldn't save the container:\n${(r.stderr || '').trim()}`); }
+    }
     if (ok) {
       writeJson(join(tmp, 'snapshot.json'), {
         name, root, created: new Date().toISOString(), image,
         volumes: Object.fromEntries(volumes.map((v) => [toolOf(v), v])),
+        ...(full ? { full: { image: finalImage } } : {}),
       });
       // Replace an old snapshot only now that the new one is complete.
+      const was = replacing ? readJson(join(dir, 'snapshot.json')) : null;
+      const oldImage = was?.full ? capture('docker', ['image', 'inspect', '-f', '{{.Id}}', finalImage]).stdout.trim() : '';
+      if (full) { runQuiet('docker', ['tag', partialImage, finalImage]); runQuiet('docker', ['rmi', partialImage]); }
       if (replacing) {
         const old = `${dir}.old-${process.pid}`;
         renameSync(dir, old);
@@ -1176,16 +1257,20 @@ async function cmdSnapshot(root, flags, rest) {
       } else {
         renameSync(tmp, dir);
       }
+      // The container the old snapshot kept, unless it's in use.
+      if (oldImage) runQuiet('docker', ['rmi', full ? oldImage : finalImage]);
     }
   } finally {
-    if (!ok) rmSync(tmp, { recursive: true, force: true });
+    if (!ok) { rmSync(tmp, { recursive: true, force: true }); if (full) runQuiet('docker', ['rmi', partialImage]); }
     for (const c of stopped) runQuiet('docker', ['start', c.id]);
     process.removeListener('SIGINT', onInt);
   }
   if (stopped.length) await resumeForwards(root);
   if (interrupted) { console.error(`${NAME} snapshot: stopped; nothing was saved.`); return 130; }
   if (!ok) return 1;
-  console.log(`${replacing ? 'Replaced' : 'Saved'} snapshot ${name}: the project folder${volumes.length ? ` and ${volumes.map(toolOf).join(', ')} data` : ''} (${humanSize(dirSize(dir))}).`);
+  const parts = ['the project folder', ...(volumes.length ? [`${volumes.map(toolOf).join(', ')} data`] : []), ...(full ? ['the container'] : [])];
+  const size = humanSize(dirSize(dir)) + (full ? `, + container ${savedContainerSize(finalImage) ?? '?'}` : '');
+  console.log(`${replacing ? 'Replaced' : 'Saved'} snapshot ${name}: ${parts.slice(0, -1).join(', ')}${parts.length > 1 ? ' and ' : ''}${parts.at(-1)} (${size}).`);
   console.log(`\`${NAME} restore ${name}\` puts it all back.`);
   return 0;
 }
@@ -1203,11 +1288,18 @@ async function cmdRestore(root, flags, rest) {
   if (refuseOverlap(root, 'restore')) return 1;
   const tools = Object.keys(meta.volumes || {}).filter((t) => AGENT_TOOLS.includes(t));
 
+  const quick = flags.has('--quick');
+  // A full snapshot's container comes back too, unless --quick keeps this one.
+  const savedImage = meta.full && !quick ? meta.full.image : null;
+  const haveSaved = savedImage && capture('docker', ['image', 'inspect', savedImage]).status === 0;
+  if (savedImage && !haveSaved) console.log(`The container saved with ${name} is gone (deleted from Docker?), so a fresh one will be set up instead.`);
+
   const cs = findContainers(root);
-  const note = busyNote(whatsRunning(cs), (s) => `Restoring ${flags.has('--quick') ? 'stops' : 'replaces'} ${s}, which`);
+  const note = busyNote(whatsRunning(cs), (s) => `Restoring ${quick ? 'stops' : 'replaces'} ${s}, which`);
   const q = `${note ? `${note}\n` : ''}`
     + `This replaces, with the snapshot:\n  - everything in ${root}, including its git history\n`
     + `${tools.length ? '  - this project\'s Claude, Codex, and Gemini data\n' : ''}`
+    + `${haveSaved ? '  - the container, with everything that was installed in it\n' : ''}`
     + `Restore ${name} (${new Date(meta.created).toLocaleString()})?`;
   if (!(await confirm(q, flags))) return 1;
 
@@ -1233,7 +1325,6 @@ async function cmdRestore(root, flags, rest) {
   const target = (t) => mounted[t]
     || (AGENT_VOLUME.test(meta.volumes[t] || '') && toolOf(meta.volumes[t]) === t ? meta.volumes[t] : `agent-${t}-${id}`);
 
-  const quick = flags.has('--quick');
   for (const c of cs) {
     if ((runQuiet('docker', quick ? ['stop', c.id] : ['rm', '-f', c.id]).status ?? 1) !== 0) {
       console.error(`${NAME} restore: couldn't ${quick ? 'stop' : 'remove'} container ${c.id}, so nothing was changed.`);
@@ -1268,8 +1359,24 @@ async function cmdRestore(root, flags, rest) {
     await resumeForwards(root);
     return status;
   }
-  console.log('Starting a fresh container. As with any rebuild, you\'ll sign in to Claude again (`--quick` keeps the container, and the sign-in).');
-  const up = dc(['up', '--workspace-folder', root]);
+  let up;
+  if (haveSaved) {
+    // The saved container, from the project's own config (just restored) with
+    // the saved image in place of the original one, and setup skipped: it ran
+    // already, and setup would sign the agents out.
+    console.log('Starting the saved container, as it was: the same tools and versions, and still signed in.');
+    const tmpDir = mkdtempSync(join(tmpdir(), 'dcp-restore-'));
+    try {
+      const config = fullRestoreConfig(readFileSync(join(root, '.devcontainer', 'devcontainer.json'), 'utf8'), savedImage);
+      writeFileSync(join(tmpDir, 'devcontainer.json'), JSON.stringify(config, null, 2));
+      up = dc(['up', '--workspace-folder', root, '--override-config', join(tmpDir, 'devcontainer.json'), '--skip-post-create']);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  } else {
+    console.log('Starting a fresh container. As with any rebuild, you\'ll sign in to Claude again (`--quick` keeps the container, and the sign-in).');
+    up = dc(['up', '--workspace-folder', root]);
+  }
   if (up === 0) await resumeForwards(root);
   return up || status;
 }
@@ -1723,6 +1830,7 @@ const HELP = `${NAME} — dev containers without VS Code
   ${NAME} forward <port>... --network   ...and to other devices on your network
   ${NAME} forward --rm <port>...        stop forwarding them
   ${NAME} snapshot <name> [--overwrite] save the project folder and agent data
+                                       (--full: the container too, tools and all)
   ${NAME} snapshot --list | --rm <name> list snapshots, or delete one
   ${NAME} restore <name> [--quick]      put a snapshot back (--yes: don't ask)
   ${NAME} status                        show this project's containers
@@ -1768,7 +1876,7 @@ async function main(argv) {
     }
   }
   if (cmd === 'snapshot' || cmd === 'restore') {
-    const allowed = cmd === 'snapshot' ? ['--list', '--rm', '--yes', '--overwrite'] : ['--quick', '--yes'];
+    const allowed = cmd === 'snapshot' ? ['--list', '--rm', '--yes', '--overwrite', '--full'] : ['--quick', '--yes'];
     const unknown = [...flags].filter((f) => !allowed.includes(f));
     if (unknown.length) { console.error(`${NAME} ${cmd}: unknown option ${unknown.join(' ')}`); return 1; }
   }

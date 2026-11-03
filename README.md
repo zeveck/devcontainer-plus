@@ -182,14 +182,17 @@ Without `dc`, the volumes are named `agent-claude-<id>`, `agent-codex-<id>`, and
 
 ## Snapshots: saving a moment and going back
 
-A snapshot saves your project folder and the agents' data (their history, settings, plugins and sign-ins) so you can come back to exactly that moment later. It's handy for trying things: set things up the way you like, take a snapshot, try something, and go back as often as you want.
+A snapshot saves your project folder and the agents' data (their history, settings, plugins and sign-ins) so you can come back to them later. It's handy for trying things: set things up the way you like, take a snapshot, try something, and go back as often as you want.
 
 ```
-dc snapshot clean          save this moment as "clean"
+dc snapshot clean          save the project and agent data as "clean"
+dc snapshot clean --full   ...and the container too, tools and all
 dc restore clean           go back to it
 dc snapshot --list         see your snapshots
 dc snapshot --rm clean     delete one
 ```
+
+A plain snapshot doesn't save the container, so restoring it sets up a new one, and setup installs today's versions of Claude, Codex, Gemini and the rest. Add `--full` to save the container as well, as a Docker image: restoring it brings back the container just as it was, with the same tools and versions and nothing to reinstall. That image can take a few GB; `dc snapshot --list` shows which snapshots are full and how much their container takes. A full snapshot's container works only on the computer that took it.
 
 To take a new snapshot under a name you've used before, add `--overwrite` (`dc snapshot clean --overwrite`). The old one is replaced only once the new one has saved completely, so a snapshot that fails partway leaves the old one as it was.
 
@@ -197,7 +200,7 @@ If the container is running, `dc snapshot` stops it for a moment while it copies
 
 You can keep as many as you like and hop between them: take `clean` before trying something, `try-1` after, and `dc restore clean` or `dc restore try-1` whenever you want.
 
-`dc restore` puts the project folder back exactly as it was (files made since are removed, changed files go back) and starts a brand-new container, so anything the work left inside the old container is gone too. That takes a few minutes while the agents install, and, as with any rebuild, you'll sign in to Claude again. Add `--quick` to keep the container instead: it's back in seconds, sign-in and all, but anything installed inside the container since stays.
+`dc restore` puts the project folder back exactly as it was (files made since are removed, changed files go back) and replaces the container, so anything the work left inside the old one is gone too. For a full snapshot that's the saved container, signed in as it was. Otherwise it's a new container: that takes a few minutes while setup installs the agents (at their latest versions), and, as with any rebuild, you'll sign in to Claude again. Add `--quick` to keep the current container instead: it's back in seconds, sign-in and all, but anything installed inside the container since stays.
 
 Restoring replaces what's in your project folder, so `dc restore` asks first (add `--yes` to skip the question). It checks the snapshot is whole and belongs to this project before it changes anything. A few things to know:
 
@@ -206,7 +209,7 @@ Restoring replaces what's in your project folder, so `dc restore` asks first (ad
 - **A `--quick` sign-in can be stale.** It's the one from when you took the snapshot; if Claude has refreshed it since, you may need to sign in again anyway.
 - **If a file can't be removed** (another program has it open), everything from the snapshot still comes back, and `dc restore` tells you which leftovers to delete.
 
-Snapshots are kept on your computer in `dc`'s own folder, never in the project, because they hold your sign-ins and `.env` keys. The image isn't part of a snapshot: nothing you do changes it, and `dc restore` reuses it (unless the snapshot's dev container setup differs from what's cached, in which case it's rebuilt). In the rare case there's no image to do the copying with, `dc` fetches a small one, which needs an internet connection the first time.
+Snapshots are kept on your computer in `dc`'s own folder, never in the project, because they hold your sign-ins and `.env` keys; a full snapshot's container is kept in Docker, and `dc snapshot --rm` deletes it with the rest. A plain snapshot reuses the dev container image for its new container (unless the snapshot's dev container setup differs from what's cached, in which case it's rebuilt). In the rare case there's no image to do the copying with, `dc` fetches a small one, which needs an internet connection the first time.
 
 ## Reaching a server in the container
 
