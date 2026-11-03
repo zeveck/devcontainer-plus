@@ -406,3 +406,19 @@ test('commands that stop or replace a busy container ask one question, naming wh
   assert.equal(runDc('down', '--yes').status, 0);
   assert.ok(calls().some((l) => l.startsWith('docker stop')));
 });
+
+test('VERSION is a release date no older than the last change to dc.mjs', async () => {
+  const { VERSION } = await import('../.devcontainer/dc.mjs');
+  const m = /^(\d{4})\.(\d{1,2})\.(\d{1,2})(\.\d+)?$/.exec(VERSION);
+  assert.ok(m, `VERSION ${VERSION} should look like 2026.11.3`);
+  const released = Date.UTC(+m[1], +m[2] - 1, +m[3]);
+  const cwd = fileURLToPath(new URL('..', import.meta.url));
+  // Needs the history: a shallow clone (CI's checkout) dates every file to its one commit.
+  const shallow = spawnSync('git', ['rev-parse', '--is-shallow-repository'], { encoding: 'utf8', cwd });
+  if (shallow.status !== 0 || shallow.stdout.trim() !== 'false') return;
+  const r = spawnSync('git', ['log', '-1', '--format=%ct', '--', '.devcontainer/dc.mjs'], { encoding: 'utf8', cwd });
+  if (r.status !== 0 || !r.stdout.trim()) return;
+  const changed = new Date(Number(r.stdout.trim()) * 1000);
+  const changedDay = Date.UTC(changed.getUTCFullYear(), changed.getUTCMonth(), changed.getUTCDate());
+  assert.ok(released >= changedDay, `dc.mjs changed on ${changed.toISOString().slice(0, 10)}, after VERSION ${VERSION}: raise it`);
+});

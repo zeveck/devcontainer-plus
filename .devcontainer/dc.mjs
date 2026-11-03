@@ -22,6 +22,9 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const NAME_ARG = /^--dc-name=[\w.-]+$/.test(process.argv[2] || '') ? process.argv.splice(2, 1)[0] : '';
 const NAME = NAME_ARG.slice('--dc-name='.length) || 'dc';
 const IS_WIN = platform() === 'win32';
+// The release date (and .2, .3 for later releases that day). A test fails if
+// this file changed after that date without it being raised.
+export const VERSION = '2026.11.3';
 const LABEL = 'devcontainer.local_folder';
 
 // ── pure helpers (unit-tested; see test/dc.test.mjs) ─────────────────────────
@@ -1513,6 +1516,7 @@ async function cmdUpdate(root, flags, rest) {
     if (record?.version !== template.version || !record) writeFileSync(recordPath, JSON.stringify(newRecord, null, 2) + '\n');
     console.log('This project\'s dev container is up to date.');
     remindLeftovers();
+    refreshInstalled(template);
     return 0;
   }
 
@@ -1545,13 +1549,19 @@ async function cmdUpdate(root, flags, rest) {
   console.log(`Updated. Rebuild to use it: ${NAME} up --rebuild`);
   if (keeps.length) console.log('Compare each .new file with yours, keep what you want from it, then delete it.');
   remindLeftovers();
-  // The dc command on your PATH is a separate copy; say if it's now older.
+  refreshInstalled(template);
+  return 0;
+}
+
+// The dc command on your PATH is its own copy, made by `dc install`. Update
+// brings it up to the template too, so commands like restore run the same
+// code as the project. (A `--link` install runs the repo's copy instead.)
+function refreshInstalled(template) {
   const installed = join(installPaths(['dc']).payload, 'dc.mjs');
   const latest = template.files.find((f) => f.name === 'dc.mjs');
-  if (latest && existsSync(installed) && fingerprint(readFileSync(installed, 'utf8')) !== fingerprint(latest.text)) {
-    console.log(`Your ${NAME} command is older than this project's. To update it: ${IS_WIN ? '.\\.devcontainer\\dc install' : './.devcontainer/dc install'}`);
-  }
-  return 0;
+  if (!latest || !existsSync(installed) || fingerprint(readFileSync(installed, 'utf8')) === fingerprint(latest.text)) return;
+  writeFileSync(installed, lf(latest.text));
+  console.log(`Updated the ${NAME} command too.`);
 }
 
 // ── install / uninstall ─────────────────────────────────────────────────────
@@ -1739,7 +1749,7 @@ async function main(argv) {
     return 1;
   }
   if (!cmd || cmd === 'help' || cmd === '--help' || cmd === '-h' || flags.has('--help')) { console.log(HELP); return 0; }
-  if (cmd === 'version' || cmd === '--version' || flags.has('--version')) { console.log(`${NAME} 1.0.0`); return 0; }
+  if (cmd === 'version' || cmd === '--version' || flags.has('--version')) { console.log(`${NAME} ${VERSION}`); return 0; }
   if (cmd === 'install') return cmdInstall(flags, rest);
   if (cmd === 'uninstall') return cmdUninstall(flags, rest);
   if (cmd === 'doctor') return cmdDoctor();

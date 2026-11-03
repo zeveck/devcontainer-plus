@@ -6,6 +6,11 @@ of https://dcp.synapticnoise.com/whats-new/, which `dcp update` links to.
 Each entry is one line: a short bold headline, then a sentence in plain words,
 under the date it's released.
 
+## 2026-11-03
+
+- **Restoring a snapshot really works on Windows now.** The Nov 1 fix still left restored files read-only inside the container; they're yours again, and existing snapshots work as they are.
+- **`dcp update` keeps the `dcp` command current too.** No more running `dc install` again after an update, and `dcp version` shows which version you have.
+
 ## 2026-11-01
 
 - **Restoring a snapshot works on Windows and macOS.** Restored projects were left read-only inside the container, so setup stopped with "Permission denied"; they now belong to you again.

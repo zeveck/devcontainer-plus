@@ -3,7 +3,7 @@
 // both changed the same lines, and removes files the template dropped.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, realpathSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -30,9 +30,13 @@ function setup(t) {
   const proj = join(dir, 'proj');
   mkdirSync(join(proj, '.devcontainer'), { recursive: true });
   writeFileSync(join(proj, '.devcontainer', 'devcontainer.json'), '{}\n');
-  const update = ({ yes = true } = {}) => spawnSync(process.execPath, [DC, 'update', tpl, ...(yes ? ['--yes'] : [])], { cwd: proj, encoding: 'utf8', input: '' });
+  // A home of its own, so updating the installed command never touches yours.
+  const home = join(dir, 'home');
+  const env = { ...process.env, HOME: home, USERPROFILE: home, LOCALAPPDATA: join(home, 'AppData', 'Local') };
+  const installed = process.platform === 'win32' ? join(env.LOCALAPPDATA, 'Programs', 'dc', 'dc.mjs') : join(home, '.local', 'share', 'dc', 'dc.mjs');
+  const update = ({ yes = true } = {}) => spawnSync(process.execPath, [DC, 'update', tpl, ...(yes ? ['--yes'] : [])], { cwd: proj, encoding: 'utf8', input: '', env });
   const read = (name) => readFileSync(join(proj, '.devcontainer', name), 'utf8');
-  return { proj, release, write: (files) => write(proj, files), update, read };
+  return { proj, release, write: (files) => write(proj, files), update, read, installed };
 }
 
 test('dc update: first run adds the template, then a later one updates, merges and removes', (t) => {
@@ -128,4 +132,23 @@ test("dc update: devcontainer-plus's own files are simply replaced, never merged
   assert.ok(!existsSync(join(s.proj, '.devcontainer', 'dc.mjs.orig')), 'no backup of it either');
   assert.ok(!existsSync(join(s.proj, '.devcontainer', 'dc.mjs.new')), 'an old .new beside it is cleared');
   assert.doesNotMatch(r.stdout, /dc\.mjs/, 'and nothing about it is said');
+});
+
+test('dc update brings the installed command up to the template too, even when the project is current', (t) => {
+  const s = setup(t);
+  s.release({ 'dc.mjs': 'console.log("new")\n' });
+  mkdirSync(dirname(s.installed), { recursive: true });
+  writeFileSync(s.installed, 'console.log("old")\n');
+  let r = s.update();
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /Updated the dc command too\./);
+  assert.equal(readFileSync(s.installed, 'utf8'), 'console.log("new")\n');
+  // Up to date, but the installed copy is old again: still refreshed.
+  writeFileSync(s.installed, 'console.log("old")\n');
+  r = s.update();
+  assert.match(r.stdout, /is up to date[\s\S]*Updated the dc command too\./);
+  assert.equal(readFileSync(s.installed, 'utf8'), 'console.log("new")\n');
+  // Nothing installed (or already current): nothing said.
+  r = s.update();
+  assert.doesNotMatch(r.stdout, /command too/);
 });

@@ -56,7 +56,7 @@ npm i -g @devcontainers/cli
 
 That one is technically optional. Without it `dc` downloads the same tool on the fly, which works but adds a few seconds to every command.
 
-Install `dc` itself from the project folder. This is once per machine, not per project — skip it if you've done it before, or rerun it to pick up a newer version:
+Install `dc` itself from the project folder. This is once per machine, not per project — skip it if you've done it before (`dc update` keeps it current after that):
 
 ```powershell
 .\.devcontainer\dc install     # Windows
@@ -283,6 +283,8 @@ dc update
 ```
 
 It checks GitHub for a newer version (or give it a local copy of this repo: `dc update C:\LocalDev\devcontainer-plus`), links to [what's new](https://dcp.synapticnoise.com/whats-new/), and asks before changing anything. Then rebuild with `dc up --rebuild`.
+
+It also updates the `dc` command on your PATH, if it's older, so everything runs the same version (`dc version` shows which).
 
 Files you haven't touched are simply updated. Files you've changed keep your changes, with the new version merged in. If you both changed the same lines, yours stays as it is and the new version is saved beside it as `<file>.new` to compare; `dc update` tells you when that happens. Files that aren't part of devcontainer-plus are left alone.
 
