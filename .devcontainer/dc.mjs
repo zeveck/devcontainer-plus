@@ -959,14 +959,19 @@ const save = (from, file) => `${TAR_N} umask 077 && tar $N --exclude=./${STAGING
  * `exact` keeps owners and permissions (Linux file systems). Without it (Docker
  * Desktop's shared folders on Windows and macOS) the helper's root would own
  * every file, leaving the project read-only to the container's user, so the
- * files are handed to the owner the archive recorded for the folder itself;
- * where a share refuses that, they're made writable instead.
+ * files are handed to the owner the archive recorded for what's inside the
+ * folder. (Not the folder itself: Docker shows an attached Windows folder as
+ * root's, open to everyone, while the files in it belong to the container's
+ * user.) If that owner is root, nothing was recorded, or the share didn't take
+ * it, the files are made writable instead.
  */
 export const refill = (target, archive, exact) => {
   const own = exact ? '$N -p' : '--no-same-owner --no-same-permissions';
   const S = `${target}/${STAGING}`;
-  const handBack = exact ? '' : `o=$(tar --numeric-owner -tvzf /snap/${archive} 2>/dev/null | awk 'NR==1{print $2}' | tr / :); `
-    + `case "$o" in *[0-9]:*[0-9]) chown -R "$o" ${target} 2>/dev/null || chmod -R a+rwX ${target} 2>/dev/null;; esac; `;
+  const handBack = exact ? '' : `o=$(tar --numeric-owner -tvzf /snap/${archive} 2>/dev/null | awk 'NR==2{print $2}' | tr / :); `
+    + `case "$o" in [1-9]*:*[0-9]) chown -R "$o" ${target} 2>/dev/null; `
+    + `[ "$(stat -c %u:%g ${target})" = "$o" ] || chmod -R a+rwX ${target} 2>/dev/null;; `
+    + `*) chmod -R a+rwX ${target} 2>/dev/null;; esac; `;
   return `${TAR_N} rm -rf ${S} && mkdir ${S} && tar ${own} -C ${S} -xzf /snap/${archive} `
     + `|| { rm -rf ${S}; echo "couldn't unpack ${archive}" >&2; exit 3; }; `
     + `find ${target} -mindepth 1 -maxdepth 1 ! -name ${STAGING} -exec rm -rf {} + 2>/dev/null; `

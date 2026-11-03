@@ -437,10 +437,14 @@ test('restore hands files back to the recorded owner where it unpacks as root wi
   const { refill } = await import('../.devcontainer/dc.mjs');
   // Docker Desktop shares (Windows, macOS): no exact owners, so the helper's
   // root would own everything and the project would be read-only to the
-  // container's user. The archive's own owner for the folder is put back.
+  // container's user. The owner recorded for what's inside the folder (not
+  // the folder itself, which Docker shows as root's on Windows) is put back.
   const shared = refill('/proj', 'project.tgz', false);
-  assert.match(shared, /tar --numeric-owner -tvzf \/snap\/project\.tgz/);
-  assert.match(shared, /chown -R "\$o" \/proj 2>\/dev\/null \|\| chmod -R a\+rwX \/proj/);
+  assert.match(shared, /tar --numeric-owner -tvzf \/snap\/project\.tgz 2>\/dev\/null \| awk 'NR==2/);
+  assert.match(shared, /\[1-9\]\*:\*\[0-9\]\) chown -R "\$o" \/proj/);
+  // Root, nothing recorded, or an owner the share didn't take: made writable.
+  assert.match(shared, /\[ "\$\(stat -c %u:%g \/proj\)" = "\$o" \] \|\| chmod -R a\+rwX \/proj/);
+  assert.match(shared, /\*\) chmod -R a\+rwX \/proj/);
   // Linux keeps exact owners already, and the agent volumes too.
   assert.doesNotMatch(refill('/proj', 'project.tgz', true), /chown -R/);
 });
