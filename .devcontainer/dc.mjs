@@ -1196,9 +1196,10 @@ async function cmdRestore(root, flags, rest) {
 
   const cs = findContainers(root);
   const note = busyNote(whatsRunning(cs), (s) => `Restoring ${flags.has('--quick') ? 'stops' : 'replaces'} ${s}, which`);
-  const q = `${note ? `${note} ` : ''}`
-    + `Restore ${name} (${new Date(meta.created).toLocaleString()})? This replaces everything in ${root}, including its git history,`
-    + `${tools.length ? ' and this project\'s Claude, Codex, and Gemini data' : ''} with the snapshot.`;
+  const q = `${note ? `${note}\n` : ''}`
+    + `This replaces, with the snapshot:\n  - everything in ${root}, including its git history\n`
+    + `${tools.length ? '  - this project\'s Claude, Codex, and Gemini data\n' : ''}`
+    + `Restore ${name} (${new Date(meta.created).toLocaleString()})?`;
   if (!(await confirm(q, flags))) return 1;
 
   const image = helperImage(cs, meta.image);
