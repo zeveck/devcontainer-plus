@@ -959,6 +959,31 @@ function helper(image, mounts, script) {
   return spawnSmart('docker', args, { encoding: 'utf8' });
 }
 
+/**
+ * A slow docker step that prints no progress of its own (saving a container
+ * can take minutes): says what it's doing and, on a terminal, counts the time.
+ */
+function timed(label, args) {
+  return new Promise((done) => {
+    const started = Date.now();
+    const tty = process.stdout.isTTY;
+    const clock = () => { const s = Math.round((Date.now() - started) / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+    const show = () => process.stdout.write(`\r${label}... ${clock()}`);
+    if (tty) show(); else console.log(`${label}...`);
+    const tick = tty ? setInterval(show, 1000) : null;
+    let stdout = '', stderr = '';
+    const child = spawn('docker', args, { stdio: ['ignore', 'pipe', 'pipe'], env: CHILD_ENV });
+    child.stdout.on('data', (d) => { stdout += d; });
+    child.stderr.on('data', (d) => { stderr += d; });
+    const finish = (status) => {
+      if (tick) { clearInterval(tick); process.stdout.write(`\r${label}... ${clock()}, ${status === 0 ? 'done' : 'failed'}.\n`); }
+      done({ status, stdout, stderr });
+    };
+    child.on('error', (e) => { stderr += e.message; finish(1); });
+    child.on('close', (status) => finish(status ?? 1));
+  });
+}
+
 // Prefer GNU tar's --numeric-owner (keeps file owners exact across images);
 // fall back quietly where the helper's tar lacks it.
 const TAR_N = 'N=; tar --numeric-owner --version >/dev/null 2>&1 && N=--numeric-owner;';
@@ -1227,16 +1252,18 @@ async function cmdSnapshot(root, flags, rest) {
     if (ok) mkdirSync(tmp, { mode: 0o700 });
     const snapMount = ok && mountArg('bind', tmp, '/snap');
     for (const v of ok ? volumes : []) {
+      console.log(`Saving ${toolOf(v)} data...`);
       const r = helper(image, [mountArg('volume', v, '/v', true), snapMount], save('/v', `${toolOf(v)}.tgz`));
       if (r.status !== 0 || interrupted) { ok = false; if (!interrupted) console.error(`${NAME} snapshot: couldn't save ${v}:\n${(r.stderr || '').trim()}`); break; }
     }
     if (ok) {
+      console.log('Saving the project folder...');
       const r = helper(image, [mountArg('bind', root, '/proj', true), snapMount], save('/proj', 'project.tgz'));
       if (r.status !== 0 || interrupted) { ok = false; if (!interrupted) console.error(`${NAME} snapshot: couldn't save the project folder:\n${(r.stderr || '').trim()}`); }
     }
     // --full: the container itself, while it's stopped, under a temporary tag.
     if (ok && full) {
-      const r = capture('docker', ['commit', (running[0] || cs[0]).id, partialImage]);
+      const r = await timed('Saving the container (this can take a few minutes)', ['commit', (running[0] || cs[0]).id, partialImage]);
       if (r.status !== 0 || interrupted) { ok = false; if (!interrupted) console.error(`${NAME} snapshot: couldn't save the container:\n${(r.stderr || '').trim()}`); }
     }
     if (ok) {
