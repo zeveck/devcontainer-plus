@@ -418,7 +418,9 @@ test('VERSION is a release date no older than the last change to dc.mjs', async 
   if (shallow.status !== 0 || shallow.stdout.trim() !== 'false') return;
   const r = spawnSync('git', ['log', '-1', '--format=%ct', '--', '.devcontainer/dc.mjs'], { encoding: 'utf8', cwd });
   if (r.status !== 0 || !r.stdout.trim()) return;
-  const changed = new Date(Number(r.stdout.trim()) * 1000);
+  // Uncommitted changes count as made today, so the test catches it before a push.
+  const dirty = spawnSync('git', ['diff', '--quiet', 'HEAD', '--', '.devcontainer/dc.mjs'], { cwd }).status !== 0;
+  const changed = dirty ? new Date() : new Date(Number(r.stdout.trim()) * 1000);
   const changedDay = Date.UTC(changed.getUTCFullYear(), changed.getUTCMonth(), changed.getUTCDate());
   assert.ok(released >= changedDay, `dc.mjs changed on ${changed.toISOString().slice(0, 10)}, after VERSION ${VERSION}: raise it`);
 });
