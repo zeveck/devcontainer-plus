@@ -24,7 +24,7 @@ const NAME = NAME_ARG.slice('--dc-name='.length) || 'dc';
 const IS_WIN = platform() === 'win32';
 // The release date (and .2, .3 for later releases that day). A test fails if
 // this file changed after that date without it being raised.
-export const VERSION = '2026.11.3';
+export const VERSION = '2026.11.4';
 const LABEL = 'devcontainer.local_folder';
 
 // ── pure helpers (unit-tested; see test/dc.test.mjs) ─────────────────────────
