@@ -24,7 +24,7 @@ const NAME = NAME_ARG.slice('--dc-name='.length) || 'dc';
 const IS_WIN = platform() === 'win32';
 // The release date (and .2, .3 for later releases that day). A test fails if
 // this file changed after that date without it being raised.
-export const VERSION = '2026.11.4';
+export const VERSION = '2026.11.5';
 const LABEL = 'devcontainer.local_folder';
 
 // ── pure helpers (unit-tested; see test/dc.test.mjs) ─────────────────────────
@@ -1857,7 +1857,7 @@ const HELP = `${NAME} — dev containers without VS Code
   ${NAME} forward <port>... --network   ...and to other devices on your network
   ${NAME} forward --rm <port>...        stop forwarding them
   ${NAME} snapshot <name> [--overwrite] save the project folder and agent data
-                                       (--full: the container too, tools and all)
+  ${NAME} snapshot <name> --full        ...and the container too, tools and all
   ${NAME} snapshot --list | --rm <name> list snapshots, or delete one
   ${NAME} restore <name> [--quick]      put a snapshot back (--yes: don't ask)
   ${NAME} status                        show this project's containers
@@ -1866,7 +1866,7 @@ const HELP = `${NAME} — dev containers without VS Code
   ${NAME} init [template folder]        add devcontainer-plus to this folder
   ${NAME} update [template folder]      bring .devcontainer up to the latest template
   ${NAME} doctor                        check prerequisites
-  ${NAME} install [name] [--link]       install to your PATH (as ${NAME} and dcp, or just [name])
+  ${NAME} install [name] [--link]       install to your PATH (as dc and dcp, or just [name])
   ${NAME} uninstall [name]              remove it (both names, or just [name])
 `;
 
