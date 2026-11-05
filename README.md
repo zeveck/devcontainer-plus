@@ -1,6 +1,6 @@
 # devcontainer-plus
 
-A development container that's ready to work in, with Claude Code, Codex CLI, and Gemini CLI already installed and set up. Open a project, start an agent, get on with it.
+A development container that's ready to work in, with Claude Code, Codex CLI, Gemini CLI and Antigravity CLI already installed and set up. Open a project, start an agent, get on with it.
 
 It all runs locally, on your own hardware. The difference is that the agents and their tools live inside the container rather than on your system, and they only see the project you opened.
 
@@ -22,7 +22,7 @@ It all runs locally, on your own hardware. The difference is that the agents and
 
 ## What's inside
 
-- Claude Code, Codex CLI, and Gemini CLI
+- Claude Code, Codex CLI, Gemini CLI, and Antigravity CLI (`agy`), Google's successor to Gemini CLI. Signing in with a Google account (free, AI Pro or Ultra) now works only in `agy`; Gemini CLI still works with a Gemini API key or Gemini Code Assist
 - Python 3.12 and Node.js 24
 - `gh` and `glab` for GitHub and GitLab, with a helper that signs you in
 - Chromium, which agents drive through the Playwright CLI
@@ -44,7 +44,7 @@ You'll also want [VS Code](https://code.visualstudio.com/) and its [Dev Containe
 1. Open the project folder in VS Code.
 2. VS Code will offer to "Reopen in Container". Click it. (If it doesn't ask, open the Command Palette and choose *Dev Containers: Reopen in Container*.)
 3. Go make coffee. The first build takes a few minutes.
-4. Open a terminal in VS Code and type `claude`, or `codex`, or `gemini`.
+4. Open a terminal in VS Code and type `claude`, or `codex`, `gemini` or `agy`.
 
 ### Without VS Code
 
@@ -69,7 +69,7 @@ That puts a copy of `dc` on your PATH, so it works from anywhere and keeps worki
 
 ```bash
 dc up          # first build takes a few minutes
-dc claude      # or dc codex, dc gemini
+dc claude      # or dc codex, dc gemini, dc agy
 ```
 
 (If typing `dc` says the command isn't found, open a new terminal and try again.)
@@ -102,7 +102,7 @@ Once installed you can type `dc` anywhere. It picks up whichever project you're 
 dc up          create and start the container   (--rebuild to start over, --fresh to also clear agent history)
 dc build       rebuild the image                (--no-cache to ignore the cache)
 dc shell       open a shell inside it
-dc claude      run Claude inside it             (also codex, gemini, pw)
+dc claude      run Claude inside it             (also codex, gemini, agy, pw)
 dc exec ...    run any command inside it
 dc down        stop it                          (dc rm deletes it too, dc rm --volumes also its agent data)
 dc volumes     saved agent history              (see below)
@@ -151,9 +151,9 @@ Rebuilding a container normally throws away everything inside it. So that your a
 |---|---|
 | `~/.claude` | Claude Code sessions (`claude --resume`), memory, settings, plugins, and prompt history |
 | `~/.codex` | Codex CLI sessions, history, and settings |
-| `~/.gemini` | Gemini CLI chats, checkpoints, and settings |
+| `~/.gemini` | Gemini CLI and Antigravity CLI chats, checkpoints, and settings |
 
-Sign-ins are the exception. Every rebuild deletes the agents' login files before anything starts, so after a rebuild you run `/login` in Claude (and sign in to Codex or Gemini if you use them), and everything else is as you left it. A login only lasts as long as the container it was made in, rather than piling up across rebuilds. `gh` and `glab` aren't kept either, so sign in to those again too.
+Sign-ins are the exception. Every rebuild deletes the agents' login files before anything starts, so after a rebuild you run `/login` in Claude (and sign in to Codex, Gemini or Antigravity if you use them), and everything else is as you left it. A login only lasts as long as the container it was made in, rather than piling up across rebuilds. `gh` and `glab` aren't kept either, so sign in to those again too.
 
 Each project gets its own volumes, so containers for different projects can't see each other's history. `dc` handles them for you:
 

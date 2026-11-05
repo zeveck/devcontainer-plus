@@ -1100,6 +1100,7 @@ export function describeActivity(lines) {
     if (comm === 'claude' || /^\d+\.\d+\.\d+$/.test(comm) || /(^|\/)claude$/.test(args.split(' ')[0] || '')) name = 'a Claude session';
     else if (/@openai\/codex|\bcodex(\s|$)/.test(args)) name = 'a Codex session';
     else if (/@google\/gemini-cli|\bgemini(\s|$)/.test(args)) name = 'a Gemini session';
+    else if (comm === 'agy' || /(^|\/)agy(\s|$)/.test(args)) name = 'an Antigravity session';
     else if (/vscode-server/.test(args)) name = 'VS Code';
     else if (/^(chrome|chromium|headless_shell)/.test(comm)) name = 'a browser';
     else if (/^(bash|zsh|sh|fish)$/.test(comm)) name = 'a shell';
@@ -1107,7 +1108,7 @@ export function describeActivity(lines) {
   }
   // Sessions first. A shell is how most other things start, so mention it only
   // when nothing else is running.
-  const order = ['a Claude session', 'a Codex session', 'a Gemini session', 'VS Code', 'a browser'];
+  const order = ['a Claude session', 'a Codex session', 'a Gemini session', 'an Antigravity session', 'VS Code', 'a browser'];
   const all = [...order.filter((n) => known.includes(n)), ...other];
   if (!all.length && known.includes('a shell')) all.push('a shell');
   if (!all.length) return '';
@@ -1849,7 +1850,7 @@ const HELP = `${NAME} — dev containers without VS Code
   ${NAME} build                         build the image
   ${NAME} shell                         interactive shell inside it
   ${NAME} exec <cmd> [args...]          run a command inside it
-  ${NAME} claude|codex|gemini|pw [...]  run an agent inside it
+  ${NAME} claude|codex|gemini|agy|pw [...] run an agent inside it
   ${NAME} down [--yes]                  stop the container
   ${NAME} rm [--volumes] [--yes]        stop and remove it (--volumes: delete agent data too)
   ${NAME} volumes [--rm | --prune]      list or delete saved agent data (--yes: don't ask)
@@ -1870,7 +1871,7 @@ const HELP = `${NAME} — dev containers without VS Code
   ${NAME} uninstall [name]              remove it (both names, or just [name])
 `;
 
-const FORWARDING = new Set(['exec', 'claude', 'codex', 'gemini', 'pw']);
+const FORWARDING = new Set(['exec', 'claude', 'codex', 'gemini', 'agy', 'pw']);
 
 async function main(argv) {
   const cmd = argv[0];
@@ -1969,7 +1970,7 @@ async function main(argv) {
       // so a non-login exec would not find them either.
       return dc(buildExecArgs(root, raw, { env: process.env }));
     }
-    case 'claude': case 'codex': case 'gemini': case 'pw': {
+    case 'claude': case 'codex': case 'gemini': case 'agy': case 'pw': {
       const tool = cmd === 'pw' ? 'playwright-cli' : cmd;
       return dc(buildExecArgs(root, [tool, ...raw], { env: process.env }));
     }

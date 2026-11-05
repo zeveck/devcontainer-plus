@@ -72,6 +72,21 @@ echo "✨ Installing Gemini CLI..."
 quiet npm install -g @google/gemini-cli@latest
 echo "   gemini $(gemini --version)"
 
+# Install Antigravity CLI (agy), Google's successor to Gemini CLI: since
+# 2026-06-18 it's the one for signing in with a Google account (free, AI Pro,
+# Ultra); Gemini CLI still works with an API key or Code Assist. Google's
+# installer checks the download's SHA-512 and puts the binary in
+# ~/.local/bin. It keeps its data in ~/.gemini/antigravity-cli, inside the
+# persisted ~/.gemini volume, and with no keychain in a container its login
+# in antigravity-oauth-token there, which on-create.sh deletes on rebuild.
+# Non-fatal: a convenience, like glab.
+echo "🚀 Installing Antigravity CLI (agy)..."
+if curl -fsSL --max-time 300 https://antigravity.google/cli/install.sh | bash >/dev/null 2>&1 && command -v agy >/dev/null; then
+  echo "   agy $(agy --version)"
+else
+  echo "⚠️  agy install failed (network or upstream change) — continuing without it."
+fi
+
 # Install the GitLab CLI (glab).
 # gh comes from the github-cli devcontainer feature, but glab has no official
 # feature, so fetch the release binary directly. The version is resolved at build

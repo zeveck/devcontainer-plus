@@ -23,7 +23,8 @@ rm -f \
   "$HOME/.gemini/google_accounts.json" \
   "$HOME/.gemini/gemini-credentials.json" \
   "$HOME/.gemini/mcp-oauth-tokens.json" \
-  "$HOME/.gemini/a2a-oauth-tokens.json"
+  "$HOME/.gemini/a2a-oauth-tokens.json" \
+  "$HOME/.gemini/antigravity-cli/antigravity-oauth-token"
 
 # Claude Code can keep a legacy API key in .claude.json (inside ~/.claude via
 # CLAUDE_CONFIG_DIR), and keeps full copies of that file in backups/. Drop just

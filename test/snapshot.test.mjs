@@ -29,6 +29,7 @@ test('describeActivity: plain words for what would be interrupted', () => {
   assert.equal(describeActivity([...idle, 'bash bash -l', 'python3 python3 -m http.server']), 'python3');
   assert.equal(describeActivity([...idle, 'node node /home/u/.vscode-server/server.js', 'claude claude', 'node node vite']), 'a Claude session, VS Code and node');
   assert.equal(describeActivity([...idle, '2.1.304 ugrep -G --hidden']), 'a Claude session', "Claude's versioned binary");
+  assert.equal(describeActivity([...idle, 'agy /home/vscode/.local/bin/agy']), 'an Antigravity session');
   assert.equal(describeActivity(['a a', 'b b', 'c c', 'd d', 'e e', 'f f']), 'a, b, c, d and 2 more');
 });
 

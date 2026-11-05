@@ -6,6 +6,10 @@ of https://dcp.synapticnoise.com/whats-new/, which `dcp update` links to.
 Each entry is one line: a short bold headline, then a sentence in plain words,
 under the date it's released.
 
+## 2026-11-05
+
+- **Antigravity CLI is installed too.** `agy`, Google's successor to Gemini CLI, is the one to use if you sign in with a Google account; run it with `agy` or `dcp agy`. Gemini CLI stays for API keys.
+
 ## 2026-11-03
 
 - **Restoring a snapshot really works on Windows now.** The Nov 1 fix still left restored files read-only inside the container; they're yours again, and existing snapshots work as they are.
