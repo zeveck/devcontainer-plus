@@ -24,7 +24,7 @@ const NAME = NAME_ARG.slice('--dc-name='.length) || 'dc';
 const IS_WIN = platform() === 'win32';
 // The release date (and .2, .3 for later releases that day). A test fails if
 // this file changed after that date without it being raised.
-export const VERSION = '2026.11.5';
+export const VERSION = '2026.11.16';
 const LABEL = 'devcontainer.local_folder';
 
 // ── pure helpers (unit-tested; see test/dc.test.mjs) ─────────────────────────
@@ -932,6 +932,72 @@ export function fullRestoreConfig(text, image) {
   config.image = image;
   return config;
 }
+
+/** True when a runArgs list already passes GPUs through. */
+export const hasGpuArg = (args) => (args || []).some((a) => a === '--gpus' || String(a).startsWith('--gpus='));
+
+/**
+ * A config with every GPU passed through to the container. Off unless asked
+ * for: most agent work doesn't need it, and a GPU in the container shares its
+ * memory with the host.
+ */
+export function withGpu(config) {
+  const args = Array.isArray(config.runArgs) ? config.runArgs : [];
+  return { ...config, runArgs: hasGpuArg(args) ? args : [...args, '--gpus', 'all'] };
+}
+
+/**
+ * True when the project asks for the GPU every time: `"hostRequirements":
+ * { "gpu": true }` (the Dev Containers spec's own setting, which VS Code reads
+ * too) or `--gpus` in runArgs. "optional" is left to the dev container tool,
+ * which adds the GPU only where it finds one.
+ */
+export function wantsGpu(text) {
+  let config;
+  try { config = parseJsonc(text); } catch { return false; }
+  return config?.hostRequirements?.gpu === true || hasGpuArg(config?.runArgs);
+}
+
+/** True when `docker inspect`'s HostConfig.DeviceRequests (as JSON) asks for a GPU. */
+export function requestsGpu(json) {
+  let reqs;
+  try { reqs = JSON.parse(json); } catch { return false; }
+  return Array.isArray(reqs) && reqs.some((d) => (d?.Capabilities || []).flat().includes('gpu'));
+}
+
+function containerHasGpu(c) {
+  const r = capture('docker', ['inspect', '--format', '{{json .HostConfig.DeviceRequests}}', c.id]);
+  return r.status === 0 && requestsGpu((r.stdout || '').trim());
+}
+
+const projectConfigPath = (root) => join(root, '.devcontainer', 'devcontainer.json');
+
+function projectWantsGpu(root) {
+  try { return wantsGpu(readFileSync(projectConfigPath(root), 'utf8')); } catch { return false; }
+}
+
+/**
+ * `devcontainer up` with the GPU passed through when `gpu` is set, and/or from
+ * `config` (an object) in place of the project's own.
+ */
+function dcUp(root, args, { gpu = false, config = null } = {}) {
+  if (!gpu && !config) return dc(args);
+  const tmpDir = mkdtempSync(join(tmpdir(), 'dcp-up-'));
+  let status;
+  try {
+    let c = config ?? parseJsonc(readFileSync(projectConfigPath(root), 'utf8'));
+    if (gpu) c = withGpu(c);
+    writeFileSync(join(tmpDir, 'devcontainer.json'), JSON.stringify(c, null, 2));
+    status = dc([...args, '--override-config', join(tmpDir, 'devcontainer.json')]);
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+  if (gpu && status !== 0) {
+    console.error(`${NAME}: if Docker said it couldn't select a device driver with capabilities [[gpu]], it has no GPU to hand out. `
+      + 'That needs an NVIDIA GPU, plus Docker Desktop with WSL 2 on Windows or the NVIDIA Container Toolkit on Linux.');
+  }
+  return status;
+}
 const FALLBACK_HELPER_IMAGE = 'debian:stable-slim';
 const STAGING = '.dc-restore-staging';
 
@@ -1388,22 +1454,18 @@ async function cmdRestore(root, flags, rest) {
     return status;
   }
   let up;
+  // The GPU comes from the project's config (just restored), not the image.
+  const gpu = projectWantsGpu(root);
   if (haveSaved) {
     // The saved container, from the project's own config (just restored) with
     // the saved image in place of the original one, and setup skipped: it ran
     // already, and setup would sign the agents out.
     console.log('Starting the saved container, as it was: the same tools and versions, and still signed in.');
-    const tmpDir = mkdtempSync(join(tmpdir(), 'dcp-restore-'));
-    try {
-      const config = fullRestoreConfig(readFileSync(join(root, '.devcontainer', 'devcontainer.json'), 'utf8'), savedImage);
-      writeFileSync(join(tmpDir, 'devcontainer.json'), JSON.stringify(config, null, 2));
-      up = dc(['up', '--workspace-folder', root, '--override-config', join(tmpDir, 'devcontainer.json'), '--skip-post-create']);
-    } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
-    }
+    const config = fullRestoreConfig(readFileSync(projectConfigPath(root), 'utf8'), savedImage);
+    up = dcUp(root, ['up', '--workspace-folder', root, '--skip-post-create'], { gpu, config });
   } else {
     console.log('Starting a fresh container. As with any rebuild, you\'ll sign in to Claude again (`--quick` keeps the container, and the sign-in).');
-    up = dc(['up', '--workspace-folder', root]);
+    up = dcUp(root, ['up', '--workspace-folder', root], { gpu });
   }
   if (up === 0) await resumeForwards(root);
   return up || status;
@@ -1847,6 +1909,7 @@ const HELP = `${NAME} — dev containers without VS Code
 
   ${NAME} up [--rebuild] [--no-cache]   create/start the container
   ${NAME} up --fresh [--yes]            rebuild with empty agent folders (deletes history)
+  ${NAME} up --gpu                      ...with the host's NVIDIA GPU available inside
   ${NAME} build                         build the image
   ${NAME} shell                         interactive shell inside it
   ${NAME} exec <cmd> [args...]          run a command inside it
@@ -1954,9 +2017,25 @@ async function main(argv) {
         if (status !== 0) return status;
         if (volumes.length) console.log('Agent data cleared; rebuilding.');
       }
-      if (flags.has('--rebuild') || flags.has('--fresh')) a.push('--remove-existing-container');
+      let replace = flags.has('--rebuild') || flags.has('--fresh');
+      const always = projectWantsGpu(root);
+      const gpu = always || flags.has('--gpu');
+      if (gpu && !replace) {
+        // A container gets its GPU when it's created, so one made without it
+        // has to be replaced.
+        const cs = findContainers(root);
+        if (cs.length && !cs.every(containerHasGpu)) {
+          console.log('This container was created without the GPU, so it will be replaced with one that has it. As with any rebuild, you\'ll sign in to Claude again.');
+          if (!(await okToInterrupt(cs, (s) => `Replacing ${s}`, flags))) return 1;
+          replace = true;
+        }
+      }
+      if (replace) a.push('--remove-existing-container');
       if (flags.has('--no-cache')) a.push('--build-no-cache');
-      const status = dc(a);
+      const status = dcUp(root, a, { gpu });
+      if (status === 0 && gpu && !always) {
+        console.log('The container has the GPU until it\'s rebuilt or restored. To keep it, add "hostRequirements": { "gpu": true } to .devcontainer/devcontainer.json.');
+      }
       if (status === 0) await resumeForwards(root);
       return status;
     }
