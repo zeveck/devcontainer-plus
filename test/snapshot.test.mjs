@@ -103,12 +103,12 @@ if (args[0] === 'run') {
 process.exit(0);
 `;
 
-function setup(t, { running = true } = {}) {
+function setup(t, { running = true, config = '{}' } = {}) {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'dc-snap-')));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const proj = join(dir, 'proj');
   mkdirSync(join(proj, '.devcontainer'), { recursive: true });
-  writeFileSync(join(proj, '.devcontainer', 'devcontainer.json'), '{}');
+  writeFileSync(join(proj, '.devcontainer', 'devcontainer.json'), config);
   writeFileSync(join(proj, 'notes.txt'), 'original notes');
   mkdirSync(join(proj, 'game'));
   writeFileSync(join(proj, 'game', 'index.html'), '<h1>v1</h1>');
@@ -122,7 +122,8 @@ function setup(t, { running = true } = {}) {
   const state = { container: true, state: running ? 'running' : 'exited', folder: proj, volumesDir, volumes: { [claudeVol]: true } };
   writeFileSync(statePath, JSON.stringify(state));
   writeFileSync(join(dir, 'docker.mjs'), FAKE_DOCKER);
-  writeFileSync(join(dir, 'devcontainer.mjs'), "import { appendFileSync } from 'node:fs'; appendFileSync(process.env.FAKE_LOG, 'devcontainer ' + process.argv.slice(2).join(' ') + '\\n');");
+  // dc deletes its override config afterwards, so keep a copy (FAKE_LOG.override).
+  writeFileSync(join(dir, 'devcontainer.mjs'), "import { appendFileSync, copyFileSync } from 'node:fs'; const a = process.argv.slice(2); const i = a.indexOf('--override-config'); if (i >= 0) copyFileSync(a[i + 1], process.env.FAKE_LOG + '.override'); appendFileSync(process.env.FAKE_LOG, 'devcontainer ' + a.join(' ') + '\\n');");
   const log = join(dir, 'calls.log');
   const env = {
     ...process.env, DC_FAKE_DOCKER: join(dir, 'docker.mjs'), DC_FAKE_DEVCONTAINER: join(dir, 'devcontainer.mjs'),
@@ -133,7 +134,8 @@ function setup(t, { running = true } = {}) {
   const clearCalls = () => rmSync(log, { force: true });
   const vol = join(volumesDir, claudeVol);
   const docker = () => JSON.parse(readFileSync(statePath, 'utf8'));
-  return { dir, proj, vol, dc, calls, clearCalls, docker, env };
+  const override = () => (existsSync(`${log}.override`) ? JSON.parse(readFileSync(`${log}.override`, 'utf8')) : null);
+  return { dir, proj, vol, dc, calls, clearCalls, docker, env, override };
 }
 
 test('dc snapshot: saves the folder and the agent data, pausing the container', (t) => {
@@ -220,6 +222,32 @@ test('dc restore: a fresh container, even after the data was deleted', (t) => {
   assert.ok(at(/^volume create agent-claude-/) > at(/^rm -f c1$/), 'then recreates the volume');
   assert.match(c.at(-1), /^devcontainer up --workspace-folder /, 'then starts a fresh one');
   assert.match(r.stdout, /sign in to Claude again/);
+});
+
+const GPU_CONFIG = '{\n  // 3D work\n  "hostRequirements": { "gpu": true },\n}';
+
+test('dc restore: a project that asks for the GPU gets it in the fresh container', (t) => {
+  if (posixOnly(t)) return;
+  const s = setup(t, { config: GPU_CONFIG });
+  assert.equal(s.dc('snapshot', 'clean', '--yes').status, 0);
+  s.clearCalls();
+  const r = s.dc('restore', 'clean', '--yes');
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(s.calls().at(-1), /^devcontainer up --workspace-folder .* --override-config /);
+  assert.deepEqual(s.override().runArgs, ['--gpus', 'all']);
+  assert.deepEqual(s.override().hostRequirements, { gpu: true });
+});
+
+test('dc restore: the GPU follows the restored config, not the one it replaced', (t) => {
+  if (posixOnly(t)) return;
+  const s = setup(t);
+  assert.equal(s.dc('snapshot', 'before-gpu', '--yes').status, 0);
+  writeFileSync(join(s.proj, '.devcontainer', 'devcontainer.json'), GPU_CONFIG);
+  s.clearCalls();
+  const r = s.dc('restore', 'before-gpu', '--yes');
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(s.calls().at(-1), `devcontainer up --workspace-folder ${s.proj}`);
+  assert.equal(s.override(), null);
 });
 
 test('dc restore: asks first, and changes nothing when it can\'t ask', (t) => {
