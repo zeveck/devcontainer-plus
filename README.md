@@ -17,6 +17,7 @@ It all runs locally, on your own hardware. The difference is that the agents and
 - [Snapshots: saving a moment and going back](#snapshots-saving-a-moment-and-going-back)
 - [Reaching a server in the container](#reaching-a-server-in-the-container)
 - [Letting an agent use a browser](#letting-an-agent-use-a-browser)
+- [Letting an agent use the GPU](#letting-an-agent-use-the-gpu)
 - [Changing how it's set up](#changing-how-its-set-up)
 - [Getting the latest version](#getting-the-latest-version)
 
@@ -99,7 +100,8 @@ Whether those belong in git is up to you. The first two are rebuilt from scratch
 Once installed you can type `dc` anywhere. It picks up whichever project you're currently sitting in.
 
 ```
-dc up          create and start the container   (--rebuild to start over, --fresh to also clear agent history)
+dc up          create and start the container   (--rebuild to start over, --fresh to also clear agent history,
+                                                --gpu to give it the GPU; see below)
 dc build       rebuild the image                (--no-cache to ignore the cache)
 dc shell       open a shell inside it
 dc claude      run Claude inside it             (also codex, gemini, agy, pw)
@@ -253,6 +255,22 @@ Chromium is installed, and Claude has a skill for driving it. You don't need to 
 You'll get the file, and a screenshot of it rendered in a real browser.
 
 It's more useful on real work: point an agent at your dev server and ask it to walk through signup, or to check whether a page still looks right on a phone-sized screen. Run `playwright-cli --help` for everything it can do.
+
+## Letting an agent use the GPU
+
+The container doesn't get your graphics card unless you ask: most agent work doesn't need it, and anything that uses it shares its memory with the programs on your own screen. For work that does, such as 3D rendering, video, or machine learning, it can make jobs that take hours finish in minutes.
+
+To try it once, run `dc up --gpu`. If the container already exists without the GPU, `dc` replaces it (checking first that nothing is busy in it), keeping agent history as any rebuild does. The container keeps the GPU until it's rebuilt or restored.
+
+For a project that always needs it, add this to `.devcontainer/devcontainer.json`:
+
+```jsonc
+"hostRequirements": { "gpu": true }
+```
+
+Then every `dc up`, rebuild, `--fresh` and `dc restore` includes the GPU, with no flag to remember, and `dc update` keeps the line. VS Code reads the same setting. `"gpu": "optional"` asks for it only where one is found, but that check doesn't always see Docker Desktop's GPU, so `dc` leaves it to VS Code and the dev container tool.
+
+It needs an NVIDIA graphics card and, on Windows, Docker Desktop using WSL 2 (its default); on Linux, the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html). Nothing goes inside the container: Docker brings in your computer's NVIDIA driver, so `nvidia-smi` works. Libraries such as PyTorch bring their own CUDA.
 
 ## Changing how it's set up
 

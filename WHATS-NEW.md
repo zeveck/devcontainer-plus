@@ -6,6 +6,10 @@ of https://dcp.synapticnoise.com/whats-new/, which `dcp update` links to.
 Each entry is one line: a short bold headline, then a sentence in plain words,
 under the date it's released.
 
+## 2026-11-16
+
+- **Agents can use your GPU.** `dcp up --gpu` gives the container your NVIDIA graphics card, for 3D, video and machine-learning work; add `"hostRequirements": { "gpu": true }` to a project's devcontainer.json to keep it through rebuilds and restores.
+
 ## 2026-11-05
 
 - **Antigravity CLI is installed too.** `agy`, Google's successor to Gemini CLI, is the one to use if you sign in with a Google account; run it with `agy` or `dcp agy`. Gemini CLI stays for API keys.
