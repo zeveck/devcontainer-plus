@@ -8,7 +8,7 @@ under the date it's released.
 
 ## 2026-11-16
 
-- **Agents can use your GPU.** `dcp up --gpu` gives the container your NVIDIA graphics card, for 3D, video and machine-learning work; add `"hostRequirements": { "gpu": true }` to a project's devcontainer.json to keep it through rebuilds and restores.
+- **Agents can use your GPU.** `dcp up --gpu` gives the container your NVIDIA graphics card, for 3D, video and machine-learning work; `dcp up --gpu --save` keeps it for that project, through rebuilds and restores.
 
 ## 2026-11-05
 

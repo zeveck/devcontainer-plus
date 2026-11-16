@@ -24,7 +24,7 @@ const NAME = NAME_ARG.slice('--dc-name='.length) || 'dc';
 const IS_WIN = platform() === 'win32';
 // The release date (and .2, .3 for later releases that day). A test fails if
 // this file changed after that date without it being raised.
-export const VERSION = '2026.11.16';
+export const VERSION = '2026.11.16.2';
 const LABEL = 'devcontainer.local_folder';
 
 // ── pure helpers (unit-tested; see test/dc.test.mjs) ─────────────────────────
@@ -955,7 +955,99 @@ export function withGpu(config) {
 export function wantsGpu(text) {
   let config;
   try { config = parseJsonc(text); } catch { return false; }
-  return config?.hostRequirements?.gpu === true || hasGpuArg(config?.runArgs);
+  return configWantsGpu(config);
+}
+const configWantsGpu = (config) => config?.hostRequirements?.gpu === true || hasGpuArg(config?.runArgs);
+
+// ── editing devcontainer.json in place (comments and layout kept) ───────────
+
+function skipBlank(text, i) {
+  for (;;) {
+    while (i < text.length && /\s/.test(text[i])) i++;
+    if (text.startsWith('//', i)) { while (i < text.length && text[i] !== '\n') i++; continue; }
+    if (text.startsWith('/*', i)) { const j = text.indexOf('*/', i + 2); i = j < 0 ? text.length : j + 2; continue; }
+    return i;
+  }
+}
+
+/** Index just past the string starting at i (a quote). */
+function stringEnd(text, i) {
+  let j = i + 1;
+  while (j < text.length && text[j] !== '"') j += text[j] === '\\' ? 2 : 1;
+  return j + 1;
+}
+
+/** Index just past the value starting at i. */
+function valueEnd(text, i) {
+  if (text[i] === '"') return stringEnd(text, i);
+  if (text[i] !== '{' && text[i] !== '[') {
+    while (i < text.length && /[\w.+-]/.test(text[i])) i++;
+    return i;
+  }
+  let depth = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === '"') { i = stringEnd(text, i); continue; }
+    if (text.startsWith('//', i) || text.startsWith('/*', i)) { i = skipBlank(text, i); continue; }
+    if (c === '{' || c === '[') depth++;
+    else if ((c === '}' || c === ']') && --depth === 0) return i + 1;
+    i++;
+  }
+  return i;
+}
+
+/** [start, end) of `key`'s value in the object whose `{` is at `open`, or null. */
+function memberValue(text, open, key) {
+  let i = open + 1;
+  for (;;) {
+    i = skipBlank(text, i);
+    if (text[i] === ',') { i++; continue; }
+    if (text[i] !== '"') return null;
+    const end = stringEnd(text, i);
+    const name = JSON.parse(text.slice(i, end));
+    i = skipBlank(text, end);
+    if (text[i] !== ':') return null;
+    const start = skipBlank(text, i + 1);
+    i = valueEnd(text, start);
+    if (name === key) return [start, i];
+  }
+}
+
+/**
+ * devcontainer.json's text with the project's GPU setting (`"hostRequirements":
+ * { "gpu": ... }`) on or off, changing nothing else: comments, order and
+ * layout stay as they were. Throws when it can't, with the reason.
+ */
+export function setGpuSetting(text, on) {
+  const config = parseJsonc(text);
+  if (configWantsGpu(config) === on) return text;
+  const root = skipBlank(text, 0);
+  if (text[root] !== '{') throw new Error('it isn\'t a JSON object');
+  const hr = memberValue(text, root, 'hostRequirements');
+  let out;
+  if (hr) {
+    if (text[hr[0]] !== '{') throw new Error('its hostRequirements isn\'t an object');
+    const gpu = memberValue(text, hr[0], 'gpu');
+    if (gpu) {
+      out = text.slice(0, gpu[0]) + String(on) + text.slice(gpu[1]);
+    } else {
+      const others = Object.keys(config.hostRequirements).length > 0;
+      out = `${text.slice(0, hr[0] + 1)} "gpu": ${on}${others ? ',' : ' '}${text.slice(hr[0] + 1)}`;
+    }
+  } else {
+    // A new first member, indented like the one after it.
+    const first = skipBlank(text, root + 1);
+    const lineStart = text.lastIndexOf('\n', first - 1) + 1;
+    const lead = text.slice(lineStart, first);
+    const indent = lineStart > root && /^[ \t]*$/.test(lead) && lead ? lead : '  ';
+    const others = Object.keys(config).length > 0;
+    const eol = text.includes('\r\n') ? '\r\n' : '\n';
+    out = `${text.slice(0, root + 1)}${eol}${indent}"hostRequirements": { "gpu": ${on} }${others ? ',' : eol}${text.slice(root + 1)}`;
+  }
+  if (configWantsGpu(parseJsonc(out)) !== on) {
+    throw new Error('its runArgs has --gpus, which gives the GPU either way: remove it there');
+  }
+  return out;
 }
 
 /** True when `docker inspect`'s HostConfig.DeviceRequests (as JSON) asks for a GPU. */
@@ -988,7 +1080,9 @@ function dcUp(root, args, { gpu = false, config = null } = {}) {
     let c = config ?? parseJsonc(readFileSync(projectConfigPath(root), 'utf8'));
     if (gpu) c = withGpu(c);
     writeFileSync(join(tmpDir, 'devcontainer.json'), JSON.stringify(c, null, 2));
-    status = dc([...args, '--override-config', join(tmpDir, 'devcontainer.json')]);
+    // With the GPU in runArgs, the dev container tool mustn't add its own
+    // (it would, for "gpu": true, where it detects one).
+    status = dc([...args, ...(gpu ? ['--gpu-availability', 'none'] : []), '--override-config', join(tmpDir, 'devcontainer.json')]);
   } finally {
     rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -1909,7 +2003,8 @@ const HELP = `${NAME} — dev containers without VS Code
 
   ${NAME} up [--rebuild] [--no-cache]   create/start the container
   ${NAME} up --fresh [--yes]            rebuild with empty agent folders (deletes history)
-  ${NAME} up --gpu                      ...with the host's NVIDIA GPU available inside
+  ${NAME} up --gpu [--save]             ...with the host's NVIDIA GPU (--save: every time)
+  ${NAME} up --no-gpu --save            stop giving this project the GPU
   ${NAME} build                         build the image
   ${NAME} shell                         interactive shell inside it
   ${NAME} exec <cmd> [args...]          run a command inside it
@@ -1998,6 +2093,29 @@ async function main(argv) {
   switch (cmd) {
     case 'up': {
       const a = ['up', '--workspace-folder', root];
+      // --save makes --gpu / --no-gpu the project's setting, written into
+      // devcontainer.json now (checked before anything else happens), so later
+      // ups, rebuilds and restores follow it.
+      let saved = null;
+      if (flags.has('--gpu') && flags.has('--no-gpu')) { console.error(`${NAME} up: use --gpu or --no-gpu, not both.`); return 1; }
+      if (flags.has('--save') && !flags.has('--gpu') && !flags.has('--no-gpu')) {
+        console.error(`${NAME} up: --save goes with --gpu (keep the GPU) or --no-gpu (stop keeping it).`);
+        return 1;
+      }
+      if (flags.has('--no-gpu') && !flags.has('--save')) {
+        console.error(`${NAME} up: --no-gpu goes with --save, to stop giving this project the GPU every time.`);
+        return 1;
+      }
+      if (flags.has('--save')) {
+        const text = readFileSync(projectConfigPath(root), 'utf8');
+        try {
+          saved = setGpuSetting(text, flags.has('--gpu'));
+        } catch (e) {
+          console.error(`${NAME} up: couldn't change the GPU setting in .devcontainer/devcontainer.json: ${e.message}. Nothing was changed.`);
+          return 1;
+        }
+        if (saved === text) saved = null;
+      }
       if (flags.has('--rebuild') && !flags.has('--fresh')) {
         if (!(await okToInterrupt(findContainers(root), (s) => `Rebuilding ${s}`, flags))) return 1;
       }
@@ -2018,23 +2136,30 @@ async function main(argv) {
         if (volumes.length) console.log('Agent data cleared; rebuilding.');
       }
       let replace = flags.has('--rebuild') || flags.has('--fresh');
-      const always = projectWantsGpu(root);
+      const always = flags.has('--save') ? flags.has('--gpu') : projectWantsGpu(root);
       const gpu = always || flags.has('--gpu');
-      if (gpu && !replace) {
-        // A container gets its GPU when it's created, so one made without it
-        // has to be replaced.
+      // A container gets its GPU when it's created, so one made without it has
+      // to be replaced, and so does one made with it when --no-gpu is saved.
+      if (!replace && (gpu || flags.has('--no-gpu'))) {
         const cs = findContainers(root);
-        if (cs.length && !cs.every(containerHasGpu)) {
-          console.log('This container was created without the GPU, so it will be replaced with one that has it. As with any rebuild, you\'ll sign in to Claude again.');
+        if (cs.length && !cs.every((c) => containerHasGpu(c) === gpu)) {
+          console.log(`This container was created ${gpu ? 'without' : 'with'} the GPU, so it will be replaced with one that ${gpu ? 'has' : 'doesn\'t have'} it. `
+            + 'As with any rebuild, you\'ll sign in to Claude again.');
           if (!(await okToInterrupt(cs, (s) => `Replacing ${s}`, flags))) return 1;
           replace = true;
         }
+      }
+      if (saved !== null) {
+        writeFileSync(projectConfigPath(root), saved);
+        console.log(gpu
+          ? 'Saved: this project gets the GPU from now on, through rebuilds and restores ("hostRequirements": { "gpu": true } in .devcontainer/devcontainer.json).'
+          : 'Saved: this project no longer gets the GPU.');
       }
       if (replace) a.push('--remove-existing-container');
       if (flags.has('--no-cache')) a.push('--build-no-cache');
       const status = dcUp(root, a, { gpu });
       if (status === 0 && gpu && !always) {
-        console.log('The container has the GPU until it\'s rebuilt or restored. To keep it, add "hostRequirements": { "gpu": true } to .devcontainer/devcontainer.json.');
+        console.log(`The container has the GPU until it's rebuilt or restored. To keep it, run \`${NAME} up --gpu --save\`.`);
       }
       if (status === 0) await resumeForwards(root);
       return status;

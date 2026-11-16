@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { writeFileSync, mkdtempSync, mkdirSync, chmodSync, readFileSync, existsSync, realpathSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { findProjectRoot, normalizeLocalFolder, buildExecArgs, parseArgs, preflightError, terminalEnv, winQuote, spawnSmart, AGENT_VOLUME, agentVolumesFromMounts, agentVolumesFromList, devcontainerId, idLabelsFor, agentVolumeNames, withGpu, wantsGpu, requestsGpu } from '../.devcontainer/dc.mjs';
+import { findProjectRoot, normalizeLocalFolder, buildExecArgs, parseArgs, preflightError, terminalEnv, winQuote, spawnSmart, AGENT_VOLUME, agentVolumesFromMounts, agentVolumesFromList, devcontainerId, idLabelsFor, agentVolumeNames, withGpu, wantsGpu, requestsGpu, setGpuSetting } from '../.devcontainer/dc.mjs';
 
 test('normalizeLocalFolder: windows drive-letter case and slashes', () => {
   const a = normalizeLocalFolder('C:\\Users\\rich\\proj', 'win32');
@@ -177,6 +177,37 @@ test('wantsGpu: hostRequirements.gpu true or --gpus in runArgs; not "optional", 
   assert.equal(wantsGpu('{"hostRequirements": { "gpu": false }}'), false);
   assert.equal(wantsGpu('{"runArgs": ["--shm-size=2g"]}'), false);
   assert.equal(wantsGpu('not json'), false);
+});
+
+test('setGpuSetting: adds the setting as the first member, indented to match', () => {
+  assert.equal(setGpuSetting('{\n    "name": "x"\n}', true), '{\n    "hostRequirements": { "gpu": true },\n    "name": "x"\n}');
+  assert.equal(setGpuSetting('{\n\t"name": "x"\n}', true), '{\n\t"hostRequirements": { "gpu": true },\n\t"name": "x"\n}');
+  assert.equal(setGpuSetting('{}', true), '{\n  "hostRequirements": { "gpu": true }\n}');
+  assert.equal(setGpuSetting('{ "name": "x" }', true), '{\n  "hostRequirements": { "gpu": true }, "name": "x" }');
+  // Windows line endings stay Windows line endings.
+  assert.equal(setGpuSetting('{\r\n  "name": "x"\r\n}\r\n', true), '{\r\n  "hostRequirements": { "gpu": true },\r\n  "name": "x"\r\n}\r\n');
+});
+
+test('setGpuSetting: edits an existing setting in place, whatever its value', () => {
+  assert.equal(setGpuSetting('{ "hostRequirements": { "cpus": 4 } }', true), '{ "hostRequirements": { "gpu": true, "cpus": 4 } }');
+  assert.equal(setGpuSetting('{ "hostRequirements": {} }', true), '{ "hostRequirements": { "gpu": true } }');
+  assert.equal(setGpuSetting('{ "hostRequirements": { "gpu": "optional" } }', true), '{ "hostRequirements": { "gpu": true } }');
+  assert.equal(setGpuSetting('{ "hostRequirements": { "gpu": { "cores": 1000 }, "cpus": 4 } }', true), '{ "hostRequirements": { "gpu": true, "cpus": 4 } }');
+  assert.equal(setGpuSetting('{ "hostRequirements": { "gpu": true } }', false), '{ "hostRequirements": { "gpu": false } }');
+});
+
+test('setGpuSetting: ignores look-alikes in comments and strings, and leaves a file already right alone', () => {
+  const text = '{\n  // "hostRequirements": { "gpu": false }\n  "name": "has \\"hostRequirements\\" in it",\n  /* "gpu": true */\n  "hostRequirements": { /* soon */ "gpu": false },\n}';
+  const out = setGpuSetting(text, true);
+  assert.equal(out, text.replace('"gpu": false },', '"gpu": true },'));
+  assert.equal(setGpuSetting(out, true), out);
+  assert.equal(setGpuSetting('{ "name": "x" }', false), '{ "name": "x" }');
+});
+
+test('setGpuSetting: refuses what it can\'t change', () => {
+  assert.throws(() => setGpuSetting('{ "runArgs": ["--gpus", "all"] }', false), /runArgs has --gpus/);
+  assert.throws(() => setGpuSetting('{ "hostRequirements": "big" }', true), /isn't an object/);
+  assert.throws(() => setGpuSetting('{ not json', true));
 });
 
 test('requestsGpu: reads docker inspect\'s DeviceRequests', () => {
@@ -374,7 +405,7 @@ test('dc up --gpu: replaces a container made without the GPU, keeping agent data
   const { runDc, calls, proj, overrideConfig } = fakeDocker(t);
   const r = runDc('up', '--gpu');
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(calls(), [`devcontainer up --workspace-folder ${proj} --remove-existing-container --override-config OVERRIDE`]);
+  assert.deepEqual(calls(), [`devcontainer up --workspace-folder ${proj} --remove-existing-container --gpu-availability none --override-config OVERRIDE`]);
   assert.deepEqual(overrideConfig().runArgs, ['--gpus', 'all']);
   assert.match(r.stdout, /created without the GPU/);
 });
@@ -384,7 +415,7 @@ test('dc up --gpu: a container that has the GPU is just started', (t) => {
   const { runDc, calls, proj } = fakeDocker(t, { gpu: true });
   const r = runDc('up', '--gpu');
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(calls(), [`devcontainer up --workspace-folder ${proj} --override-config OVERRIDE`]);
+  assert.deepEqual(calls(), [`devcontainer up --workspace-folder ${proj} --gpu-availability none --override-config OVERRIDE`]);
 });
 
 test('dc up --gpu: asks before replacing a busy container, and does nothing when it cannot ask', (t) => {
@@ -400,7 +431,7 @@ test('dc up --gpu after dc rm: creates it with the GPU', (t) => {
   const { runDc, calls, proj } = fakeDocker(t, { container: false });
   const r = runDc('up', '--gpu');
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(calls(), [`devcontainer up --workspace-folder ${proj} --override-config OVERRIDE`]);
+  assert.deepEqual(calls(), [`devcontainer up --workspace-folder ${proj} --gpu-availability none --override-config OVERRIDE`]);
 });
 
 const GPU_PROJECT = '{\n  // games need it\n  "hostRequirements": { "gpu": true },\n  "runArgs": ["--shm-size=2g"],\n}';
@@ -410,7 +441,7 @@ test('dc up in a project that asks for the GPU: gets it without --gpu, and says 
   const { runDc, calls, proj, overrideConfig } = fakeDocker(t, { gpu: true, config: GPU_PROJECT });
   const r = runDc('up');
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(calls(), [`devcontainer up --workspace-folder ${proj} --override-config OVERRIDE`]);
+  assert.deepEqual(calls(), [`devcontainer up --workspace-folder ${proj} --gpu-availability none --override-config OVERRIDE`]);
   assert.deepEqual(overrideConfig().runArgs, ['--shm-size=2g', '--gpus', 'all']);
   assert.doesNotMatch(r.stdout, /To keep it/);
 });
@@ -420,7 +451,7 @@ test('dc up --rebuild in a project that asks for the GPU: the new container has 
   const { runDc, calls, proj, overrideConfig } = fakeDocker(t, { gpu: true, config: GPU_PROJECT });
   const r = runDc('up', '--rebuild');
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(calls(), [`devcontainer up --workspace-folder ${proj} --remove-existing-container --override-config OVERRIDE`]);
+  assert.deepEqual(calls(), [`devcontainer up --workspace-folder ${proj} --remove-existing-container --gpu-availability none --override-config OVERRIDE`]);
   assert.ok(overrideConfig().runArgs.includes('--gpus'));
 });
 
@@ -429,7 +460,68 @@ test('dc up --gpu once: says how to keep it', (t) => {
   const { runDc } = fakeDocker(t, { gpu: true });
   const r = runDc('up', '--gpu');
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /"hostRequirements": \{ "gpu": true \}/);
+  assert.match(r.stdout, /To keep it, run `dc up --gpu --save`/);
+});
+
+const TEMPLATE_LIKE = '{\n  "name": "x",\n  // why the shm size\n  "runArgs": ["--shm-size=2g"],\n}\n';
+const readConfig = (proj) => readFileSync(join(proj, '.devcontainer', 'devcontainer.json'), 'utf8');
+
+test('dc up --gpu --save: writes the setting, keeps the comments, and replaces a GPU-less container', (t) => {
+  if (posixOnly(t)) return;
+  const { runDc, calls, proj, overrideConfig } = fakeDocker(t, { config: TEMPLATE_LIKE });
+  const r = runDc('up', '--gpu', '--save');
+  assert.equal(r.status, 0, r.stderr);
+  const text = readConfig(proj);
+  assert.equal(text, '{\n  "hostRequirements": { "gpu": true },\n  "name": "x",\n  // why the shm size\n  "runArgs": ["--shm-size=2g"],\n}\n');
+  assert.equal(wantsGpu(text), true);
+  assert.deepEqual(calls(), [`devcontainer up --workspace-folder ${proj} --remove-existing-container --gpu-availability none --override-config OVERRIDE`]);
+  assert.deepEqual(overrideConfig().runArgs, ['--shm-size=2g', '--gpus', 'all']);
+  assert.match(r.stdout, /Saved: this project gets the GPU/);
+  assert.doesNotMatch(r.stdout, /To keep it/);
+});
+
+test('dc up after --gpu --save: still has the GPU, no flag needed', (t) => {
+  if (posixOnly(t)) return;
+  const { runDc, calls, proj } = fakeDocker(t, { gpu: true, config: TEMPLATE_LIKE });
+  assert.equal(runDc('up', '--gpu', '--save').status, 0);
+  const r = runDc('up', '--rebuild');
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(calls().at(-1), `devcontainer up --workspace-folder ${proj} --remove-existing-container --gpu-availability none --override-config OVERRIDE`);
+});
+
+test('dc up --no-gpu --save: turns the setting off and replaces a container that has the GPU', (t) => {
+  if (posixOnly(t)) return;
+  const { runDc, calls, proj, overrideConfig } = fakeDocker(t, { gpu: true, config: GPU_PROJECT });
+  const r = runDc('up', '--no-gpu', '--save');
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(wantsGpu(readConfig(proj)), false);
+  assert.match(readConfig(proj), /\/\/ games need it/);
+  assert.deepEqual(calls(), [`devcontainer up --workspace-folder ${proj} --remove-existing-container`]);
+  assert.equal(overrideConfig(), null);
+  assert.match(r.stdout, /created with the GPU/);
+});
+
+test('dc up: --save, --no-gpu and --gpu combinations that make no sense change nothing', (t) => {
+  if (posixOnly(t)) return;
+  const { runDc, calls, proj } = fakeDocker(t, { config: TEMPLATE_LIKE });
+  for (const args of [['--save'], ['--no-gpu'], ['--gpu', '--no-gpu', '--save']]) {
+    const r = runDc('up', ...args);
+    assert.equal(r.status, 1, args.join(' '));
+    assert.match(r.stderr, /--save|--no-gpu/);
+  }
+  assert.deepEqual(calls(), []);
+  assert.equal(readConfig(proj), TEMPLATE_LIKE);
+});
+
+test('dc up --no-gpu --save: refuses when runArgs gives the GPU anyway, changing nothing', (t) => {
+  if (posixOnly(t)) return;
+  const config = '{ "runArgs": ["--gpus", "all"] }';
+  const { runDc, calls, proj } = fakeDocker(t, { gpu: true, config });
+  const r = runDc('up', '--no-gpu', '--save');
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /runArgs has --gpus/);
+  assert.deepEqual(calls(), []);
+  assert.equal(readConfig(proj), config);
 });
 
 test('dc rm: removes the container, keeps its agent data, and names it', (t) => {

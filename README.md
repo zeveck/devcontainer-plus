@@ -101,7 +101,7 @@ Once installed you can type `dc` anywhere. It picks up whichever project you're 
 
 ```
 dc up          create and start the container   (--rebuild to start over, --fresh to also clear agent history,
-                                                --gpu to give it the GPU; see below)
+                                                --gpu to give it the GPU, --gpu --save to keep it; see below)
 dc build       rebuild the image                (--no-cache to ignore the cache)
 dc shell       open a shell inside it
 dc claude      run Claude inside it             (also codex, gemini, agy, pw)
@@ -262,13 +262,7 @@ The container doesn't get your graphics card unless you ask: most agent work doe
 
 To try it once, run `dc up --gpu`. If the container already exists without the GPU, `dc` replaces it (checking first that nothing is busy in it), keeping agent history as any rebuild does. The container keeps the GPU until it's rebuilt or restored.
 
-For a project that always needs it, add this to `.devcontainer/devcontainer.json`:
-
-```jsonc
-"hostRequirements": { "gpu": true }
-```
-
-Then every `dc up`, rebuild, `--fresh` and `dc restore` includes the GPU, with no flag to remember, and `dc update` keeps the line. VS Code reads the same setting. `"gpu": "optional"` asks for it only where one is found, but that check doesn't always see Docker Desktop's GPU, so `dc` leaves it to VS Code and the dev container tool.
+For a project that always needs it, run `dc up --gpu --save`. That also writes `"hostRequirements": { "gpu": true }` into `.devcontainer/devcontainer.json` (leaving the rest of the file, comments and all, as it was), so every later `dc up`, rebuild, `--fresh` and `dc restore` includes the GPU with no flag to remember. Snapshots keep the setting, `dc update` keeps it, and VS Code reads it too. To stop, run `dc up --no-gpu --save`, which turns the setting off and replaces the container with one without the GPU. `"gpu": "optional"` asks for it only where one is found, but that check doesn't always see Docker Desktop's GPU, so `dc` leaves it to VS Code and the dev container tool.
 
 It needs an NVIDIA graphics card and, on Windows, Docker Desktop using WSL 2 (its default); on Linux, the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html). Nothing goes inside the container: Docker brings in your computer's NVIDIA driver, so `nvidia-smi` works. Libraries such as PyTorch bring their own CUDA.
 
