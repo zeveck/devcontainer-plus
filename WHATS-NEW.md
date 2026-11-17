@@ -6,6 +6,10 @@ of https://dcp.synapticnoise.com/whats-new/, which `dcp update` links to.
 Each entry is one line: a short bold headline, then a sentence in plain words,
 under the date it's released.
 
+## 2026-11-17
+
+- **No more junk on screen after a crash.** If the container stops while an agent is running, your terminal no longer types odd characters every time you move the mouse.
+
 ## 2026-11-16
 
 - **Agents can use your GPU.** `dcp up --gpu` gives the container your NVIDIA graphics card, for 3D, video and machine-learning work; `dcp up --gpu --save` keeps it for that project, through rebuilds and restores.
