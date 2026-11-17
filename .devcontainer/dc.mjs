@@ -24,7 +24,7 @@ const NAME = NAME_ARG.slice('--dc-name='.length) || 'dc';
 const IS_WIN = platform() === 'win32';
 // The release date (and .2, .3 for later releases that day). A test fails if
 // this file changed after that date without it being raised.
-export const VERSION = '2026.11.16.2';
+export const VERSION = '2026.11.17';
 const LABEL = 'devcontainer.local_folder';
 
 // ── pure helpers (unit-tested; see test/dc.test.mjs) ─────────────────────────
@@ -162,6 +162,28 @@ export function agentVolumesFromList(stdout) {
   return String(stdout || '').split('\n').map((s) => s.trim()).filter((n) => AGENT_VOLUME.test(n)).sort();
 }
 
+/**
+ * Turns off terminal modes a full-screen program may have left on. Claude Code
+ * and the other agents turn on mouse reporting, bracketed paste and so on, and
+ * turn them off as they exit; if the container dies under them they never get
+ * the chance, and every mouse move then types junk like `^[[<35;12;8M` at the
+ * prompt. Turning a mode off that is already off does nothing, so this is safe
+ * after every run. The alternate screen is left alone: leaving it when not in it
+ * can move the cursor in some terminals.
+ */
+export const TERMINAL_RESET =
+  '\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1015l' + // mouse reporting
+  '\x1b[?1004l' + // focus reporting
+  '\x1b[?2004l' + // bracketed paste
+  '\x1b[<u' + // kitty keyboard protocol: pop what the program pushed
+  '\x1b[>4;0m' + // xterm modifyOtherKeys
+  '\x1b[?25h'; // show the cursor
+
+/** Write TERMINAL_RESET if `out` is a terminal (never into a pipe or file). */
+export function restoreTerminal(out = process.stdout) {
+  if (out && out.isTTY) out.write(TERMINAL_RESET);
+}
+
 export function parseArgs(argv) {
   const flags = new Set();
   const rest = [];
@@ -248,6 +270,11 @@ function dc(args) {
   }
   const [cmd, prefix] = devcontainerCmd();
   return run(cmd, [...prefix, ...args]).status ?? 1;
+}
+
+/** dc() for commands that hand the terminal to a program in the container. */
+function dcInteractive(args) {
+  try { return dc(args); } finally { restoreTerminal(); }
 }
 
 /** Fail fast with a readable message instead of letting the CLI emit a stack trace. */
@@ -2167,16 +2194,16 @@ async function main(argv) {
     case 'build':
       return dc(['build', '--workspace-folder', root, ...(flags.has('--no-cache') ? ['--no-cache'] : [])]);
     case 'shell':
-      return dc(buildExecArgs(root, ['bash', '-l'], { login: false, env: process.env }));
+      return dcInteractive(buildExecArgs(root, ['bash', '-l'], { login: false, env: process.env }));
     case 'exec': {
       if (!raw.length) { console.error(`${NAME} exec: need a command`); return 1; }
       // Login shell here too: node/npm resolve via /etc/profile.d in this image,
       // so a non-login exec would not find them either.
-      return dc(buildExecArgs(root, raw, { env: process.env }));
+      return dcInteractive(buildExecArgs(root, raw, { env: process.env }));
     }
     case 'claude': case 'codex': case 'gemini': case 'agy': case 'pw': {
       const tool = cmd === 'pw' ? 'playwright-cli' : cmd;
-      return dc(buildExecArgs(root, [tool, ...raw], { env: process.env }));
+      return dcInteractive(buildExecArgs(root, [tool, ...raw], { env: process.env }));
     }
     case 'rm':
       if (flags.has('--volumes')) return cmdRmVolumes(root, flags);

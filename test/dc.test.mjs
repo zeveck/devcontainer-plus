@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { writeFileSync, mkdtempSync, mkdirSync, chmodSync, readFileSync, existsSync, realpathSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { findProjectRoot, normalizeLocalFolder, buildExecArgs, parseArgs, preflightError, terminalEnv, winQuote, spawnSmart, AGENT_VOLUME, agentVolumesFromMounts, agentVolumesFromList, devcontainerId, idLabelsFor, agentVolumeNames, withGpu, wantsGpu, requestsGpu, setGpuSetting } from '../.devcontainer/dc.mjs';
+import { findProjectRoot, normalizeLocalFolder, buildExecArgs, parseArgs, preflightError, terminalEnv, winQuote, spawnSmart, AGENT_VOLUME, agentVolumesFromMounts, agentVolumesFromList, devcontainerId, idLabelsFor, agentVolumeNames, withGpu, wantsGpu, requestsGpu, setGpuSetting, TERMINAL_RESET, restoreTerminal } from '../.devcontainer/dc.mjs';
 
 test('normalizeLocalFolder: windows drive-letter case and slashes', () => {
   const a = normalizeLocalFolder('C:\\Users\\rich\\proj', 'win32');
@@ -624,4 +624,22 @@ test('VERSION is a release date no older than the last change to dc.mjs', async 
   const changed = dirty ? new Date() : new Date(Number(r.stdout.trim()) * 1000);
   const changedDay = Date.UTC(changed.getUTCFullYear(), changed.getUTCMonth(), changed.getUTCDate());
   assert.ok(released >= changedDay, `dc.mjs changed on ${changed.toISOString().slice(0, 10)}, after VERSION ${VERSION}: raise it`);
+});
+
+test('restoreTerminal: turns off mouse reporting and the rest on a terminal', () => {
+  const written = [];
+  restoreTerminal({ isTTY: true, write: (s) => written.push(s) });
+  assert.deepEqual(written, [TERMINAL_RESET]);
+  for (const mode of ['1000', '1002', '1003', '1006', '1004', '2004']) {
+    assert.ok(TERMINAL_RESET.includes(`\x1b[?${mode}l`), `turns off ?${mode}`);
+  }
+  // Leaving the alternate screen when not in it can move the cursor.
+  assert.ok(!TERMINAL_RESET.includes('1049'));
+});
+
+test('restoreTerminal: writes nothing into a pipe or file', () => {
+  const written = [];
+  restoreTerminal({ isTTY: false, write: (s) => written.push(s) });
+  restoreTerminal({ write: (s) => written.push(s) });
+  assert.deepEqual(written, []);
 });
