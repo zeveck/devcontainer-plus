@@ -16,10 +16,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { fetch-depth: 0 } # the VERSION test reads dc.mjs's history
-      - uses: actions/setup-node@v4
-        with: { node-version: '20' }
+      - uses: actions/setup-node@v7
+        with: { node-version: '24' }
 
       - name: Unit tests
         run: node --test
